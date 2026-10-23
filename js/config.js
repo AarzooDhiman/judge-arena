@@ -33,8 +33,8 @@ JUDGE.config = {
   // ---- Optional: Supabase for real accounts, a class leaderboard and a
   // ---- class progress dashboard. See supabase/schema.sql and README.md.
   supabase: {
-    enabled: false,
-    url: "",      // e.g. "https://abcd1234.supabase.co"
-    anonKey: ""   // the project's publishable / anon key (safe to ship in the browser)
+    enabled: true,
+    url: "https://rxvvkoyjrlrbtsqpytwr.supabase.co",      // e.g. "https://abcd1234.supabase.co"
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dnZrb3lqcmxyYnRzcXB5dHdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI3NTMzNjUsImV4cCI6MjEwODMyOTM2NX0.QvgCj5F8tg_-BIyDMS5QKxa8TDxnSSelIsaRzvt1FzM"   // the project's publishable / anon key (safe to ship in the browser)
   }
 };
