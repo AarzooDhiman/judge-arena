@@ -367,7 +367,9 @@
         U.clear(out);
         if (!r.ok) { out.append(h("p", { class: "error" }, r.error)); return; }
         const total = S.worlds().reduce((s, w) => s + w.levels.length, 0);
-        out.append(h("p", null, r.rows.length + " players"), h("div", { class: "table-wrap" }, h("table", { class: "mini" },
+        const csv = ["nickname,xp,levels_done,levels_total,badges,last_active"].concat(r.rows.map((x) =>
+          [JSON.stringify(String(x.nickname).replace(/^[=+\-@]/, "'$&")), x.xp, x.levels_done, total, x.badges, x.updated_at].join(","))).join("\n");
+        out.append(h("p", null, r.rows.length + " players"), C.btn("Download CSV", () => U.download("class-progress-" + dc.value.trim().replace(/[^\w-]/g, "_") + ".csv", csv), "ghost"), h("div", { class: "table-wrap" }, h("table", { class: "mini" },
           h("thead", null, h("tr", null, h("th", null, "Nickname"), h("th", null, "XP"), h("th", null, "Levels"), h("th", null, "Badges"), h("th", null, "Last active"))),
           h("tbody", null, r.rows.map((x) => h("tr", null, h("td", null, x.nickname), h("td", { class: "num" }, x.xp), h("td", { class: "num" }, x.levels_done + "/" + total), h("td", { class: "num" }, x.badges), h("td", null, new Date(x.updated_at).toLocaleString("en-GB"))))))));
       })), out);
