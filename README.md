@@ -57,7 +57,7 @@ There are no email accounts and no names.
 - On the same device, the game signs them in again automatically.
 - An optional display name can be set at sign-up. It stays on the device and is never sent anywhere.
 
-The trimester and year together form the **cohort**, such as `T1|25/26`. It groups the leaderboard and the instructor dashboard.
+The trimester and year together form the **cohort**, such as `T1|25/26`. It groups the instructor dashboard.
 
 ## Configure (`js/config.js`)
 
@@ -72,7 +72,7 @@ The trimester and year together form the **cohort**, such as `T1|25/26`. It grou
 
 **Default (no database):** progress stays in each student's browser. Nothing is sent anywhere. Set `supabase.enabled` to `false`.
 
-**With Supabase (optional):** students can continue on any device, the cohort gets a leaderboard, and you get a dashboard, feedback summaries and research exports.
+**With Supabase (optional):** students can continue on any device, there is one leaderboard for everyone (the top 5 show on the front page and the top 10 on the map, using shortened player codes such as `JA-7K**`), and you get a dashboard, feedback summaries and research exports.
 
 1. Create a free project at supabase.com. Choose a region that suits your data rules (London for the UK).
 2. Open the **SQL editor**, paste all of `supabase/schema.sql`, and change `CHANGE-ME` to your own staff code. Run it. The script is safe to run again after an update, and it keeps your existing data.
@@ -87,7 +87,7 @@ The database tables are closed to the browser. All access goes through database 
 |---|---|---|
 | Progress summary: which levels are done, best scores, badges, XP | `judge_players` | Instructor (needs the staff code) |
 | Star ratings, comments and final-question answers | `judge_feedback` | Instructor, as averages and counts |
-| Engagement events: levels reached, timings, scores, visits, copy and paste counts | `judge_events` | Instructor export, **only for players who said yes** |
+| Engagement events: worlds opened, levels reached, the score for each question, timings, visits, copy and paste counts | `judge_events` | Instructor export, **only for players who said yes** |
 
 It never stores what students type, which answers they chose, or checkpoints. Free-text feedback goes to `judge_feedback` and nowhere else.
 
@@ -97,8 +97,13 @@ The first time a player signs in, a card asks whether their usage data may be in
 
 Withdrawing consent stops new events and removes the player from exports. It does not delete events already stored. To delete one player's events, use the SQL line at the end of `supabase/schema.sql`.
 
-**Ethics note:** if scores, feedback or usage data will be used as research data, collect them under your approved ethics protocol, and check that the consent wording on the consent card matches your approval. Only use Supabase mode with participants who have consented.
+### Deleting an account
 
+On the Account screen a player can choose **Delete my account**. This removes their progress, feedback and usage events from the database and from their device, and withdraws consent. Only the player code stays, flagged with a `deleted_at` date in the `judge_players` table. That flag is visible in Supabase only: the instructor screen on the website doesn't list deleted players and its exports don't include them. A deleted code can't be signed in to again. The player can create a new code to start again.
+
+### Research queries (Supabase only)
+
+`supabase/research-queries.sql` has ready-made queries to paste into the Supabase SQL editor: worlds opened and completed per player, the score for each question, and the list of deleted codes. Results show in the editor and can be downloaded as CSV from there. They are not part of the website.
 ## Change the examples
 
 Each world's content lives in one file under `js/data/`:

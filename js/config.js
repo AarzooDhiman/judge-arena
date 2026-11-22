@@ -8,7 +8,7 @@ JUDGE.config = {
   appName: "JUDGE Arena",
 
   // Students choose a trimester and an academic year. Together they form the
-  // cohort key, e.g. "T1|25/26", used for storage, the leaderboard and the dashboard.
+  // cohort key, e.g. "T1|25/26", used for storage and the instructor dashboard.
   // NOTE: on a static site these are a door, not a lock. Anyone who reads the
   // page source can see them. Use Supabase (below) for real accounts.
   trimesters: [
@@ -31,7 +31,7 @@ JUDGE.config = {
   // Optional link back to the JUDGE / DAIM site, shown in the footer.
   judgeSiteUrl: "",
 
-  // ---- Optional: Supabase for real accounts, a class leaderboard and a
+  // ---- Optional: Supabase for real accounts, a leaderboard and a
   // ---- class progress dashboard. See supabase/schema.sql and README.md.
   supabase: {
     enabled: true,   // needs supabase/schema.sql (version 2) to have been run in your project first

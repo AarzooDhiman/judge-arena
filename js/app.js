@@ -84,6 +84,9 @@
     setTimeout(() => t.remove(), 3800);
   }
 
+  /* ---------------- leaderboard (one list for everyone, shortened codes) ---------------- */
+  const shortCode = (c) => String(c || "").slice(0, 5) + "**";
+
   /* ---------------- login ---------------- */
   function showLogin(msg) {
     const params = new URLSearchParams(location.search);
@@ -152,12 +155,21 @@
         showInstructor();
       } }, staffCode, h("button", { type: "submit", class: "btn ghost" }, "Open instructor tools"), staffErr));
 
+    const topBox = h("section", { class: "leaderboard top-box", hidden: true });
+    if (J.remote.enabled) {
+      J.remote.leaderboard(5).then((rows) => {
+        if (!rows.length || !topBox.isConnected) return;
+        topBox.append(h("h2", null, "Top 5 players"), h("ol", { class: "lb" }, rows.slice(0, 5).map((r) => h("li", null, h("span", null, r.player_code), h("b", null, r.xp + " XP")))));
+        topBox.hidden = false;
+      });
+    }
     frame(h("div", { class: "login" },
       h("section", { class: "login-hero" },
         h("p", { class: "eyebrow" }, "JUDGE · Graduate Standard practice"),
         h("h1", { class: "display" }, "Judge the work.", h("br"), "Not the robot."),
         h("p", { class: "lede" }, "Five worlds of short, playable levels on reports, code and slides. Spot what's wrong, fix what's weak, defend it out loud — and find the ideas no AI would give you."),
-        h("ol", { class: "world-strip" }, S.worlds().map((w) => h("li", { class: "w-" + w.colour }, h("span", null, w.num <= 5 ? w.num : "★"), " ", w.name)))),
+        h("ol", { class: "world-strip" }, S.worlds().map((w) => h("li", { class: "w-" + w.colour }, h("span", null, w.num <= 5 ? w.num : "★"), " ", w.name))),
+        topBox),
       h("section", { class: "login-card" }, h("h2", null, "Join your class"), form, staff)));
     (fromLink ? pin : tri).focus();
   }
@@ -235,10 +247,10 @@
     const lb = h("section", { class: "leaderboard", hidden: true });
     frame([hero, path, lb]);
     if (J.remote.enabled && !st.instructor) {
-      J.remote.leaderboard(st.profile.cohort).then((rows) => {
+      J.remote.leaderboard(10).then((rows) => {
         if (!rows.length) return;
         lb.hidden = false;
-        lb.append(h("h2", null, "Class leaderboard"), h("ol", { class: "lb" }, rows.slice(0, 10).map((r) => h("li", { class: r.player_code === st.profile.code ? "me" : "" }, h("span", null, r.player_code), h("b", null, r.xp + " XP")))));
+        lb.append(h("h2", null, "Leaderboard"), h("ol", { class: "lb" }, rows.slice(0, 10).map((r) => h("li", { class: r.player_code === shortCode(st.profile.code) ? "me" : "" }, h("span", null, r.player_code), h("b", null, r.xp + " XP")))));
       });
     }
   }
@@ -595,9 +607,24 @@
   function showAccount() {
     current = null;
     const st = S.state;
+    const online = J.remote.enabled && !st.instructor;
+    const eraseMsg = h("p", { class: "error", role: "alert", hidden: true });
     const confirmBox = h("div", { class: "confirm", hidden: true },
-      h("p", null, "Erase all JUDGE Arena progress stored in this browser? This can't be undone."),
-      h("div", { class: "row-end" }, C.btn("Cancel", () => (confirmBox.hidden = true), "ghost"), C.btn("Erase", () => { T.stop(false); S.resetDevice(); showLogin("Progress on this device was erased."); }, "danger")));
+      h("p", null, online
+        ? "Delete your account? This removes your progress, feedback and usage data from this device and from the class database. Your instructor will only see that your player code was deleted. Your player code can't be used again, and this can't be undone."
+        : "Erase all JUDGE Arena progress stored in this browser? This can't be undone."),
+      eraseMsg,
+      h("div", { class: "row-end" }, C.btn("Cancel", () => { confirmBox.hidden = true; eraseMsg.hidden = true; }, "ghost"), C.btn(online ? "Delete" : "Erase", async () => {
+        eraseMsg.hidden = true;
+        await T.stop(false);
+        if (online && !(await J.remote.erase())) {
+          eraseMsg.textContent = "Couldn't reach the class database, so your account was not deleted. Check your connection and try again.";
+          eraseMsg.hidden = false;
+          return;
+        }
+        S.resetDevice();
+        showLogin(online ? "Your account was deleted." : "Progress on this device was erased.");
+      }, "danger")));
     const consentBox = h("input", { type: "checkbox", id: "set-consent" });
     consentBox.checked = S.consent() === true;
     consentBox.addEventListener("change", () => {
@@ -612,7 +639,7 @@
       st.instructor ? null : h("p", null, "Your player code: ", h("span", { class: "player-code" }, st.profile.code), " ", C.btn("Copy", async () => { await U.copy(st.profile.code); toast("Player code copied"); }, "ghost", { "data-copy-ok": "" })),
       h("div", { class: "row-start" },
         C.btn("Sign out", async () => { await T.stop(true); S.logout(); showLogin(); }, "ghost"),
-        C.btn("Erase progress on this device", () => (confirmBox.hidden = false), "ghost")),
+        C.btn(online ? "Delete my account" : "Erase progress on this device", () => (confirmBox.hidden = false), "ghost")),
       confirmBox,
       J.remote.enabled && !st.instructor ? h("label", { class: "check" }, consentBox, " Include my usage data in research (optional). We never record what you type or which answers you choose.") : null,
       h("p", { class: "hint" }, "To continue later, choose \"Continue with my player code\" and enter your player code and PIN" + (J.remote.enabled ? " — on any device." : " on this device."))

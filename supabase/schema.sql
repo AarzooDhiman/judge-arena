@@ -41,7 +41,8 @@ alter table public.judge_players
   add column if not exists last_seen        timestamptz not null default now(),
   add column if not exists visit_count      integer not null default 0,
   add column if not exists research_consent boolean,
-  add column if not exists consent_at       timestamptz;
+  add column if not exists consent_at       timestamptz,
+  add column if not exists deleted_at       timestamptz;   -- set when the player erases their data
 
 alter table public.judge_players alter column class_code drop not null;
 alter table public.judge_players alter column nickname   drop not null;
@@ -245,6 +246,9 @@ begin
   if not found or p_pin is null or r.pin_hash <> crypt(p_pin, r.pin_hash) then
     return json_build_object('ok', false, 'error', 'invalid');
   end if;
+  if r.deleted_at is not null then
+    return json_build_object('ok', false, 'error', 'deleted');
+  end if;
 
   select coalesce(json_object_agg(f.world_id, json_build_object(
            'rating', (f.payload->>'rating')::int, 'comment', coalesce(f.payload->>'comment', ''),
@@ -280,21 +284,23 @@ begin
            'worlds_done', coalesce(nullif(p_progress->>'worlds_done', '')::int, 0)),
          xp = greatest(0, least(coalesce(p_xp, 0), 100000)),
          updated_at = now()
-   where token = p_token;
+   where token = p_token and deleted_at is null;
 end;
 $$;
 
--- Player codes and XP only.
-create or replace function public.judge_leaderboard(p_cohort text)
+-- One leaderboard for everyone, across all cohorts. Players with no XP and deleted players
+-- are left out. Only a shortened player code (first five characters, then **) and XP are
+-- returned, so the public list can't be used to guess full codes.
+create or replace function public.judge_leaderboard(p_limit integer default 10)
 returns table (player_code text, xp integer)
 language sql
 security definer
 set search_path = public, extensions
 as $$
-  select player_code, xp from public.judge_players
-   where cohort = trim(p_cohort) and player_code is not null
+  select left(player_code, 5) || '**', xp from public.judge_players
+   where player_code is not null and deleted_at is null and xp > 0
    order by xp desc, updated_at asc
-   limit 50;
+   limit greatest(1, least(coalesce(p_limit, 10), 50));
 $$;
 
 -- ---- research consent -----------------------------------------------------
@@ -307,7 +313,7 @@ set search_path = public, extensions
 as $$
   update public.judge_players
      set research_consent = p_consent, consent_at = now()
-   where token = p_token;
+   where token = p_token and deleted_at is null;
 $$;
 
 -- ---- feedback -------------------------------------------------------------
@@ -321,7 +327,7 @@ set search_path = public, extensions
 as $$
 declare r public.judge_players; v_world text := coalesce(p_world, '');
 begin
-  select * into r from public.judge_players where token = p_token;
+  select * into r from public.judge_players where token = p_token and deleted_at is null;
   if not found then return json_build_object('ok', false, 'error', 'unknown_player'); end if;
   if p_kind not in ('world', 'final')
      or (p_kind = 'world' and v_world !~ '^[a-z0-9-]{1,12}$')
@@ -362,7 +368,7 @@ declare
                                     'level_exit', 'level_complete', 'world_complete', 'copy_attempt', 'paste',
                                     'tab_hidden', 'badge', 'checkpoint_resume', 'feedback'];
 begin
-  select * into p from public.judge_players where token = p_token;
+  select * into p from public.judge_players where token = p_token and deleted_at is null;
   if not found then return json_build_object('ok', false, 'error', 'unknown_player'); end if;
   if p.research_consent is not true then return json_build_object('ok', false, 'error', 'no_consent'); end if;
   if p_events is null or jsonb_typeof(p_events) <> 'array' or jsonb_array_length(p_events) > 50 then
@@ -403,6 +409,33 @@ begin
 end;
 $$;
 
+-- ---- erase my data --------------------------------------------------------
+
+-- The player deletes their account. Progress, feedback and usage events are removed and
+-- research consent is withdrawn. Only the player code stays, flagged deleted in the
+-- judge_players table (visible in Supabase only, not on the website). The code can
+-- no longer be signed in to, saves nothing new and is left off the leaderboard.
+create or replace function public.judge_erase(p_token uuid)
+returns json
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare r public.judge_players;
+begin
+  select * into r from public.judge_players where token = p_token;
+  if not found then return json_build_object('ok', false, 'error', 'unknown_player'); end if;
+  delete from public.judge_events   where player_id = r.id;
+  delete from public.judge_feedback where player_id = r.id;
+  update public.judge_players
+     set progress = '{}'::jsonb, state = '{}'::jsonb, xp = 0, visit_count = 0,
+         research_consent = false, consent_at = now(),
+         deleted_at = coalesce(deleted_at, now()), updated_at = now()
+   where id = r.id;
+  return json_build_object('ok', true);
+end;
+$$;
+
 -- ---- instructor: dashboard, feedback summary, exports (all need the staff code) ----
 
 create or replace function public.judge_class_progress(p_cohort text, p_staff_code text)
@@ -419,7 +452,7 @@ begin
            coalesce(jsonb_array_length(case when jsonb_typeof(p.progress->'badges') = 'array' then p.progress->'badges' else '[]'::jsonb end), 0)::int,
            p.updated_at
       from public.judge_players p
-     where p.cohort = trim(p_cohort) and p.player_code is not null
+     where p.cohort = trim(p_cohort) and p.player_code is not null and p.deleted_at is null
      order by p.xp desc;
 end;
 $$;
@@ -515,7 +548,7 @@ begin
       else '{}'::jsonb end
       order by p.player_code)
       from public.judge_players p
-     where p.cohort = trim(p_cohort) and p.player_code is not null), '[]'::jsonb);
+     where p.cohort = trim(p_cohort) and p.player_code is not null and p.deleted_at is null), '[]'::jsonb);
 end;
 $$;
 
@@ -527,8 +560,9 @@ revoke all on function public.judge_clean_payload(text, jsonb)                 f
 revoke all on function public.judge_register(text, text)                       from public;
 revoke all on function public.judge_login(text, text, text)                    from public;
 revoke all on function public.judge_save(uuid, jsonb, integer)                 from public;
-revoke all on function public.judge_leaderboard(text)                          from public;
+revoke all on function public.judge_leaderboard(integer)                       from public;
 revoke all on function public.judge_set_consent(uuid, boolean)                 from public;
+revoke all on function public.judge_erase(uuid)                                from public;
 revoke all on function public.judge_feedback(uuid, text, text, jsonb)          from public;
 revoke all on function public.judge_log_events(uuid, jsonb)                    from public;
 revoke all on function public.judge_class_progress(text, text)                 from public;
@@ -539,8 +573,9 @@ revoke all on function public.judge_export_summary(text, text)                 f
 grant execute on function public.judge_register(text, text)                    to anon, authenticated;
 grant execute on function public.judge_login(text, text, text)                 to anon, authenticated;
 grant execute on function public.judge_save(uuid, jsonb, integer)              to anon, authenticated;
-grant execute on function public.judge_leaderboard(text)                       to anon, authenticated;
+grant execute on function public.judge_leaderboard(integer)                    to anon, authenticated;
 grant execute on function public.judge_set_consent(uuid, boolean)              to anon, authenticated;
+grant execute on function public.judge_erase(uuid)                             to anon, authenticated;
 grant execute on function public.judge_feedback(uuid, text, text, jsonb)       to anon, authenticated;
 grant execute on function public.judge_log_events(uuid, jsonb)                 to anon, authenticated;
 grant execute on function public.judge_class_progress(text, text)              to anon, authenticated;

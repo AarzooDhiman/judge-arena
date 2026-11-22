@@ -55,6 +55,7 @@
     if (!/^\d{4}$/.test(pin)) return { ok: false, error: "Your PIN must be exactly 4 digits." };
     const { data, error } = await rpc("judge_login", { p_cohort: cohort, p_player_code: code, p_pin: pin });
     if (error) return { ok: false, error: "Couldn't reach the class database. Check your connection and try again." };
+    if (data && data.error === "deleted") return { ok: false, error: "This player code was erased by its owner and can no longer be used. Create a new player." };
     if (!data || !data.ok) return { ok: false, error: "That player code and PIN don't match for this trimester and year." };
     R.token = data.token;
     U.lsSet(tokenKey(cohort, code), data.token);
@@ -72,6 +73,13 @@
     if (!R.client || !R.token) return;
     const { error } = await rpc("judge_save", { p_token: R.token, p_progress: progress, p_xp: xp });
     if (error) console.warn("Sync failed — progress is still saved on this device.", error.message);
+  };
+
+  /* Erase this player's data on the server. The instructor then sees the player marked as deleted. */
+  R.erase = async function () {
+    if (!R.client || !R.token) return false;
+    const { data, error } = await rpc("judge_erase", { p_token: R.token });
+    return !error && !!(data && data.ok);
   };
 
   R.setConsent = async function (value) {
@@ -109,9 +117,10 @@
     } catch (e) { return false; }
   };
 
-  R.leaderboard = async function (cohort) {
+  /* The top players across every cohort: [{ player_code (shortened), xp }] */
+  R.leaderboard = async function (limit) {
     if (!R.client) return [];
-    const { data, error } = await rpc("judge_leaderboard", { p_cohort: cohort });
+    const { data, error } = await rpc("judge_leaderboard", { p_limit: limit || 10 });
     return error ? [] : data || [];
   };
 
