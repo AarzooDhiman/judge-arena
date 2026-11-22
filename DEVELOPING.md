@@ -15,7 +15,7 @@ This is a working platform, not a starter kit. You only need to change things wh
    - An AI assistant you can chat with about the code, such as *Claude Code* or *GitHub Copilot Chat*. The `CLAUDE.md` file in this folder briefs any assistant on how the project works, so it doesn't break the rules (no build step, content only in `js/data`, and so on).
 3. **Open the project.** Unzip `judge-arena.zip`, then use *File → Open Folder…* and choose the `judge-arena` folder.
 4. **Preview it.** Right-click `index.html` → **Open with Live Server**. Sign in with *Instructor access* (code in `js/config.js`) to unlock every world.
-5. **Change the instructor code** in `js/config.js` now, before you forget.
+5. **Change the instructor code** in `js/config.js` now, before you forget. The repository is public, so anyone can read it.
 6. **Put it on GitHub.**
    - Open the Source Control panel (`Ctrl/Cmd+Shift+G`), click **Publish to GitHub**, and choose **public**.
    - On github.com, open the repo, then **Settings → Pages → Deploy from a branch → main / (root) → Save**.
@@ -83,18 +83,22 @@ Paste the result into `w5-beyond.js` and change `runsNote` to say the counts are
 ```
 I've created a Supabase project and run supabase/schema.sql. My project URL is
 [url] and my anon key is [key]. Update js/config.js to enable Supabase. Then
-walk me through testing it: sign in as two students in two browsers, check the
-leaderboard on the map, and load the class dashboard from the Instructor screen.
+walk me through testing it: start a new player in one browser, note the player
+code, continue as that player in a private window, check the leaderboard on the
+map, and load the cohort dashboard from the Instructor screen.
 ```
 
 ### Research data export (only once ethics approval is in place)
+The Instructor screen already has **Export engagement data (CSV)**. It downloads two files: the raw events (only for players who agreed) and a one-row-per-player summary (progress only for players who didn't agree). Before using it for research, check that:
+- your ethics approval matches the wording on the consent card (`showConsent` in `js/app.js`);
+- you know who may hold the exports, and for how long.
+
+To add a column to the summary, change both `judge_export_summary` in `supabase/schema.sql` and `summaryCsv` in `js/app.js`.
 ```
-Add an "Export class data (CSV)" button to the Instructor screen, shown only when
-Supabase is enabled. It should call a new SECURITY DEFINER function
-judge_export(p_class, p_staff_code) — add it to supabase/schema.sql in the same
-style as judge_class_progress — returning nickname, per-level best scores,
-badges, and the judgement record fields. No other personal data. Download it as
-a CSV file.
+Add a column "[name]" to the engagement summary export. Update
+judge_export_summary in supabase/schema.sql and summaryCsv in js/app.js together,
+keep the rule that players who did not agree get progress only, and never
+include what a player typed or chose.
 ```
 
 ### New level types
@@ -137,11 +141,22 @@ smallest change. Then tell me how to check the fix.
 
 ---
 
-## Part 4 — Running a session
+## Part 4 — Checking your changes
 
-- **Before:** check the QR code on your phone. Set `classes` in `js/config.js` to today's code.
+After editing content, play the edited level once from start to finish and check the browser console (right-click → Inspect → Console) shows no red errors. Then check these, because they are the things most likely to break:
+
+1. **Unlocking.** As a new player (not instructor), World 2 stays locked until every level in World 1 is done.
+2. **Checkpoints.** Leave a level part-way, come back, and press **Continue**. Your position, score and typed text should be there. Press **Start again** and it should restart.
+3. **Narrow screens and dark mode.** Make the browser about 360 pixels wide and switch your computer to dark mode. Nothing should scroll sideways, and all text should be readable.
+4. **Numbers.** Every number in a report or slide should match its notebook output, unless it's a flaw you planted on purpose (and listed in the level's `flaws`).
+
+If you add a new level type, it must work with checkpoints: use the `sequence()` helper in `js/engines.js` for multi-item levels, or call `ctx.checkpoint.save()` on every change for single-screen ones. It must also never put what a player typed or chose into an engagement event.
+
+## Part 5 — Running a session
+
+- **Before:** check the QR code on your phone. Make sure the trimester and year on the QR match today's class, and that your Supabase project is awake (free projects pause after a week of no use).
 - **Opening (5 min):** everyone scans and plays World 1 *together*. Show your screen, discuss the reveal, and ask who rated the AI paragraph higher than the human one.
 - **Middle (35–45 min):** students work at their own pace through Worlds 2–3.
-- **Pairs (15 min):** everyone stops for Viva Roulette in pairs, whichever world they reached. Project it from your instructor login (all worlds unlocked) and spin for the room, choosing *My own project* so each pair defends their own coursework.
+- **Pairs (15 min):** everyone stops for Examiner's Chair, whichever world they reached. Pairs compare their ticks and their choice of follow-up question before reading the examiners' marks. You can project a round from your instructor login (all worlds unlocked).
 - **Close (5 min):** students open *My record* and fill in the judgement record for their own coursework.
 - Worlds 4–5 and the boss work well as homework before the next session.

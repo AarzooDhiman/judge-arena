@@ -23,6 +23,17 @@ JUDGE.worlds.push({
   tagline: "Fix it like you mean it",
   intro: "In the viva, students read numbers off crowded slides and defended paragraphs nobody could follow. Here you fix exactly those problems — with meters that tell you when you've done it.",
   colour: "coral",
+  debrief: {
+    challenge: "AI-style presentation: slides crammed with every metric, titles that name a section instead of a finding, and inflated prose that uses five words for one thing. It hides whether you understand your result, and in a viva it pushes you into reading numbers aloud.",
+    practised: "Choosing the numbers that answer the research question, writing titles as findings, cutting filler while keeping every fact, and explaining a slide without looking at it.",
+    improve: [
+      "Write each slide title as a sentence that states the result.",
+      "Keep to three numbers per slide; move the rest to an appendix.",
+      "Read your paragraphs aloud. Cut any phrase you'd never actually say.",
+      "Pick one term per concept, then search your document for the synonyms.",
+      "Practise explaining each slide in 20 seconds without looking at it."
+    ]
+  },
   levels: [
     /* ---------------------------------------------------------------- */
     {
@@ -31,6 +42,7 @@ JUDGE.worlds.push({
       title: "Number Diet",
       blurb: "Three crowded slides. Keep at most 3 numbers each. Then write the headline.",
       minutes: 12,
+      howTo: "Three crowded results slides, each with the research question it's meant to answer. Tap at most three numbers to keep: the ones that answer the question. Then rewrite the slide title as the finding, in 15 words or fewer, with at most one number.",
       slides: [
         {
           id: "nd1", project: "ReAdmit",
@@ -93,6 +105,7 @@ JUDGE.worlds.push({
       title: "Jargon Jail",
       blurb: "Rewrite inflated paragraphs. Live meters tell you when you're free.",
       minutes: 15,
+      howTo: "Two paragraphs full of AI-style filler. Edit each one in the box. Live meters show length against a target, banned filler words, whether you use one name for the same thing, and whether the key facts survived. Aim for all green.",
       paragraphs: [
         {
           id: "jj1", project: "ReAdmit", label: "Methods paragraph",
@@ -135,6 +148,7 @@ JUDGE.worlds.push({
       title: "Ten-Second Slide",
       blurb: "The slide vanishes after 10 seconds. Now say what it means — without it.",
       minutes: 8,
+      howTo: "A slide appears for 10 seconds, then disappears. Write what you'd say about it to the room, without looking. You score for saying what it means, naming the key idea, and not reciting numbers.",
       seconds: 10,
       writeSeconds: 75,
       slides: [

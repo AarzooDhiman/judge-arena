@@ -10,6 +10,7 @@ JUDGE Arena is a static, gamified teaching site (GitHub Pages). Read README.md f
 - Unlocking: a world opens when every level in the previous world has `done: true` (see `store.js`). Don't bypass this except through the instructor `unlockAll` flag.
 - Styling uses the CSS custom properties at the top of `css/style.css`. Every colour must come from a token, and both light and dark themes must keep working.
 - Use `el.hidden = true/false` to hide things, never `style.display`.
+- Multi-item levels use `sequence()` in `js/engines.js` so they get checkpoints; single-screen levels save with `ctx.checkpoint.save()` on every change. Checkpoints, drafts and feedback text never go to Supabase, and engagement events never carry what a player typed or chose.
 - Library versions are pinned: highlight.js 11.9.0, qrcodejs 1.0.0, supabase-js 2.45.4.
 
 ## Content rules

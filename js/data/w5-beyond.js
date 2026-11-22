@@ -11,6 +11,16 @@ JUDGE.worlds.push({
   tagline: "Think where AI can't",
   intro: "AI gives you the average of everything it has read. These levels reward what it can't give you: your own first thought, the context nobody typed into the prompt, and the idea nobody else had.",
   colour: "rose",
+  debrief: {
+    challenge: "Thinking by prompting. Asking AI before you've thought anchors you to its average answer, misses context it was never given, and makes your work sound like everyone else's.",
+    practised: "Writing your own approach first, spotting where generic advice breaks on real-world context, generating ideas beyond the common list, and explaining under constraints.",
+    improve: [
+      "Spend ten minutes on your own outline before any prompt.",
+      "List the context an AI can't know (stakeholders, data quirks, constraints) and either give it explicitly or apply it yourself.",
+      "When AI suggests ideas, ask which of them every other student will also get.",
+      "Keep a notebook of your own ideas, and use AI to challenge them rather than to supply them."
+    ]
+  },
   levels: [
     /* ---------------------------------------------------------------- */
     {
@@ -19,6 +29,7 @@ JUDGE.worlds.push({
       title: "Think Before You Prompt",
       blurb: "Write your own answer first. Then judge the AI's — and see what only you thought of.",
       minutes: 15,
+      howTo: "A real problem from one of the projects. Write your own approach first; it locks when you're done. Then judge an AI's six suggestions as useful, generic or wrong for this situation, and see which of your ideas the AI never had.",
       thinkSeconds: 180,
       problems: [
         {
@@ -65,6 +76,7 @@ JUDGE.worlds.push({
       title: "What the Model Couldn't Know",
       blurb: "An AI plan that looks fine — until you read the emails it never saw.",
       minutes: 15,
+      howTo: "A team asked an AI how to turn their flood model into a warning tool, and the AI saw only that question. You can also read an email, a data note and meeting notes. Find the five parts of the AI's plan that break because of something it couldn't know, and say which piece of context breaks each one.",
       project: "Humber Flood Watch",
       brief: "The team asked an AI assistant: 'How should we turn our river-level model into a flood warning tool for the council?' It only saw that one question. You also have the documents below. Click each sentence of the AI's plan that breaks because of something it couldn't know — then choose which piece of context breaks it.",
       flawTypes: [
@@ -118,12 +130,15 @@ JUDGE.worlds.push({
       title: "Off the Map",
       blurb: "Score points for good ideas the AI rarely or never suggests.",
       minutes: 15,
+      howTo: "Write your own ideas first. Then rank six common answers from most to least useful, and see a chart of how often AI suggests each idea, with yours on it. Rare ideas that hold up score most.",
       runsNote: "Counts are illustrative: they show how often typical AI answers include each idea across 30 runs of the same prompt. Your instructor can replace them with real runs.",
       questions: [
         {
           id: "om1", project: "ReAdmit",
           question: "Apart from accuracy-style metrics, how could you judge whether ReAdmit is actually a good model to use?",
           runs: 30,
+          rank: ["fair", "calib", "external", "unflagged", "addvalue", "shap"],
+          expert: "Many people rank fairness and explainability first because AI always mentions them, and they matter. But 'does it add anything over the nurses' own judgement?' decides whether the model is worth using at all, and AI almost never asks it.",
           themes: [
             { id: "fair", label: "Check fairness across patient groups", count: 27 },
             { id: "shap", label: "Explainability (SHAP, feature importance)", count: 25 },
@@ -141,6 +156,8 @@ JUDGE.worlds.push({
           id: "om2", project: "Any project",
           question: "Your dissertation's main claim is 'Model X beats Model Y on this task.' WITHOUT training any more models, how could you test whether that claim is really true?",
           runs: 30,
+          rank: ["stats", "leak", "lit", "matters", "rerun", "opposite"],
+          expert: "Significance tests are the common answer. 'Would the difference matter to a real user?' and 'have someone else re-run it from scratch' are rarer, and often more revealing.",
           themes: [
             { id: "stats", label: "Significance test or confidence intervals", count: 26 },
             { id: "seeds", label: "Check variance across folds / random seeds", count: 21 },
@@ -163,6 +180,7 @@ JUDGE.worlds.push({
       title: "Constraint Cards",
       blurb: "Draw three cards. Explain a project under strange rules. Creativity under pressure.",
       minutes: 15,
+      howTo: "Draw three cards (an audience, a format and a twist) and explain a project under those rules. The format rule is checked automatically where possible; you check the rest yourself.",
       rounds: 2,
       decks: {
         audience: [

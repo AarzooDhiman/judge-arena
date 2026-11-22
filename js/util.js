@@ -73,7 +73,7 @@
   };
   U.containsAny = (text, list) => list.some((x) => (text || "").toLowerCase().includes(x.toLowerCase()));
 
-  /* ---- hashing (NOT security — just stops casual nickname collisions on a shared device) ---- */
+  /* ---- hashing (NOT security — just stops casual PIN mix-ups on a shared device) ---- */
   U.hash = function (s) {
     let h = 0x811c9dc5;
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
@@ -121,6 +121,16 @@
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   };
+
+  /* CSV with quoting, and a leading ' on cells a spreadsheet would run as a formula. */
+  U.csvCell = function (v) {
+    if (v == null) return "";
+    if (typeof v === "number") return String(v);
+    let s = typeof v === "object" ? JSON.stringify(v) : String(v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  U.toCsv = (header, rows) => [header].concat(rows).map((r) => r.map(U.csvCell).join(",")).join("\n");
 
   U.pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   U.clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));

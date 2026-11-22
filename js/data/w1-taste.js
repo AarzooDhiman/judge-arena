@@ -16,6 +16,16 @@ JUDGE.worlds.push({
   tagline: "Learn what good looks like",
   intro: "You can't judge AI output if you don't know what good looks like. Rate each example on quality first. Only then guess where it came from — and bet on how sure you are.",
   colour: "teal",
+  debrief: {
+    challenge: "Accepting work because it sounds fluent. AI writes grammatical, confident, well-structured text whether or not it says anything. If you can't recognise quality, you can't tell when to reject an AI draft, and you hand in \"average of everything\" work that earns average marks.",
+    practised: "Rating work on clarity, accuracy and specificity, whoever wrote it. You saw strong AI work and weak human work: who wrote something tells you very little about whether it's good.",
+    improve: [
+      "Before accepting any AI paragraph, ask: \"Could this sentence appear in anyone else's project?\" If it could, it's filler.",
+      "Read two or three top-marked dissertations or papers in your area and note what makes them specific.",
+      "Before you submit, rate your own draft 1–5 on clear, accurate and specific.",
+      "When you compare two drafts, name the reason one is better. Being able to say why is the skill."
+    ]
+  },
   levels: [
     /* ---------------------------------------------------------------- */
     {
@@ -24,10 +34,11 @@ JUDGE.worlds.push({
       title: "Blind Taste Test",
       blurb: "Rate 9 reports, code cells and slides. Then guess: AI, human, or AI-assisted?",
       minutes: 15,
+      howTo: "You'll see 9 short pieces of work from three student projects: report paragraphs, notebook code and slides. For each one, rate it 1–5 on three things: is it clear, is it accurate, and is it specific to its project? (Open \"About this project\" to see what each project is.) Then guess whether a student, an AI, or a student with AI polishing wrote it, and bet on how sure you are. Most points come from rating quality like an examiner. The guess is worth less, on purpose.",
       criteria: [
         { id: "clarity", label: "Clear", hint: "Could a classmate follow it first time?" },
         { id: "accuracy", label: "Accurate", hint: "Are the claims true and supported?" },
-        { id: "specific", label: "Specific to this project", hint: "Or could it describe any project?" }
+        { id: "specific", label: "Specific to its project", hint: "Could it only belong to this project, or would it fit any project?" }
       ],
       items: [
         {
@@ -182,6 +193,7 @@ print(m.score(X_test, y_test))   # 0.89 !!!`,
       title: "Pairwise Duel",
       blurb: "7 head-to-heads. Pick the better one and say why.",
       minutes: 10,
+      howTo: "Seven pairs. Each shows two versions of the same thing: a slide title, a paragraph, a code cell or a viva answer. Pick the stronger version and the main reason it's stronger. The better version could be on either side.",
       reasons: [
         { id: "takeaway", label: "States a clear takeaway" },
         { id: "specific", label: "Specific to this project" },
@@ -205,7 +217,7 @@ print(m.score(X_test, y_test))   # 0.89 !!!`,
           a: { kind: "text", content: "This study has some limitations. The dataset may not be representative of all populations, and future work could explore additional features and advanced models to further improve performance.", origin: "ai" },
           b: { kind: "text", content: "All 4,812 discharges come from one trust between 2019 and 2022, including the COVID-19 period, so we cannot say how the model performs at other trusts or after 2022. Readmissions to other hospitals are also missing, so the true rate is probably higher than 11.6%.", origin: "human" },
           better: "b", reason: "specific",
-          why: "A only says what every limitations section says. B names the actual boundary of the evidence and what follows from it. Examiners can tell the difference instantly."
+          why: "The weaker version only says what every limitations section says. The stronger one names the actual boundary of the evidence and what follows from it. Examiners can tell the difference instantly."
         },
         {
           id: "d3", kind: "code",
@@ -213,7 +225,7 @@ print(m.score(X_test, y_test))   # 0.89 !!!`,
           a: { kind: "code", content: "df = pd.read_csv('/Users/sam/Downloads/data (3).csv')\nX_train, X_test, y_train, y_test = train_test_split(X, y)", origin: "human" },
           b: { kind: "code", content: "DATA = Path('data') / 'readmit.csv'\nSEED = 42\n\ndf = pd.read_csv(DATA)\nX_train, X_test, y_train, y_test = train_test_split(\n    X, y, test_size=0.2, stratify=y, random_state=SEED)", origin: "ai" },
           better: "b", reason: "repro",
-          why: "B can be run by anyone with the repo, gives the same split every time, and keeps the class balance. A works on one laptop, once."
+          why: "The stronger version can be run by anyone with the repo, gives the same split every time, and keeps the class balance. The weaker one works on one laptop, once."
         },
         {
           id: "d4", kind: "report",
@@ -221,7 +233,7 @@ print(m.score(X_test, y_test))   # 0.89 !!!`,
           a: { kind: "text", content: "We used the F1-score because it is the harmonic mean of precision and recall and is widely used in machine learning.", origin: "ai" },
           b: { kind: "text", content: "We report PR-AUC rather than accuracy because only 11.6% of patients were readmitted; PR-AUC only rewards a model for finding those rare cases (Saito & Rehmsmeier, 2015).", origin: "human" },
           better: "b", reason: "specific",
-          why: "A is a textbook definition — true, but it doesn't justify anything about THIS project. B ties the choice to a fact about the data and cites a source that genuinely supports it."
+          why: "The weaker version is a textbook definition — true, but it doesn't justify anything about THIS project. The stronger one ties the choice to a fact about the data and cites a source that genuinely supports it."
         },
         {
           id: "d5", kind: "report",
@@ -229,7 +241,7 @@ print(m.score(X_test, y_test))   # 0.89 !!!`,
           a: { kind: "text", content: "The classifier was trained on 37 features. The framework was then tuned with 5-fold cross-validation, and the algorithm reached an AUROC of 0.86, showing the system works well.", origin: "ai" },
           b: { kind: "text", content: "We trained the model on 37 features and tuned it with 5-fold cross-validation. The model reached an AUROC of 0.86 on the held-out test set.", origin: "human" },
           better: "b", reason: "terms",
-          why: "In A, a reader could fairly ask whether the classifier, framework, algorithm and system are four different things. Pick one word and keep it. B also says WHERE the 0.86 was measured; A just says it 'works well'."
+          why: "In the weaker version, a reader could fairly ask whether the classifier, framework, algorithm and system are four different things. Pick one word and keep it. The stronger version also says WHERE the 0.86 was measured; the weaker one just says it 'works well'."
         },
         {
           id: "d6", kind: "slide",
@@ -237,7 +249,7 @@ print(m.score(X_test, y_test))   # 0.89 !!!`,
           a: { kind: "slide", origin: "ai", content: { title: "Model Comparison", table: { head: ["Model", "MAE 6 h", "MAE 24 h", "Peak MAE 24 h", "Train time"], rows: [["Persistence", "9.8 cm", "19.6 cm", "21.4 cm", "—"], ["LightGBM", "6.1 cm", "14.9 cm", "15.7 cm", "42 s"], ["LSTM", "6.4 cm", "13.2 cm", "12.1 cm", "38 min"]] } } },
           b: { kind: "slide", origin: "human", content: { title: "At flood peaks, the LSTM errs by 12 cm — 4 cm less than LightGBM", chart: { type: "bar", label: "Error on top 5% of river levels, 24 h ahead (cm)", unit: " cm", max: 25, data: [["Persistence", 21.4], ["LightGBM", 15.7], ["LSTM", 12.1]], highlight: 2 }, footer: "Lower is better. All horizons in appendix." } },
           better: "b", reason: "numbers",
-          why: "A is a data dump: correct, but the audience has to find the story. B picks the numbers that matter for flood WARNINGS (peaks, a day ahead) and makes them the headline."
+          why: "The weaker version is a data dump: correct, but the audience has to find the story. The stronger one picks the numbers that matter for flood WARNINGS (peaks, a day ahead) and makes them the headline."
         },
         {
           id: "d7", kind: "viva",
@@ -245,7 +257,7 @@ print(m.score(X_test, y_test))   # 0.89 !!!`,
           a: { kind: "text", content: "SHAP values are based on cooperative game theory and fairly distribute the prediction among the features, providing both local and global interpretability.", origin: "ai" },
           b: { kind: "text", content: "For patient 1182, the risk went up mostly because of four admissions in the past year and going home alone. SHAP splits each prediction into how much each feature pushed it up or down from the average patient.", origin: "human" },
           better: "b", reason: "specific",
-          why: "A is fluent and correct — and could be recited without understanding anything. B proves the student has actually looked inside their own model. This is exactly the gap examiners probe in a viva."
+          why: "The weaker version is fluent and correct — and could be recited without understanding anything. The stronger one proves the student has actually looked inside their own model. This is exactly the gap examiners probe in a viva."
         }
       ]
     }

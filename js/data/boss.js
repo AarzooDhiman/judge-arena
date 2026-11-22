@@ -11,6 +11,16 @@ JUDGE.boss = {
   tagline: "The final viva",
   intro: "A complete mini-project: 'Late or Not?' predicts which buses on Hull routes will arrive more than 5 minutes late (fictional operator, fictional data). Hunt the flaws, fix the slide, fix the paragraph, defend it out loud — then write your judgement record.",
   colour: "gold",
+  debrief: {
+    challenge: "Everything at once: fluent but unchecked write-ups, crowded slides, inflated prose and borrowed reasoning, all in one submission with your name on it.",
+    practised: "The full workflow: verify, cut, rewrite, examine and record your judgement.",
+    improve: [
+      "Draft first, then delegate specific tasks to AI rather than the whole piece.",
+      "Check every number and citation before you submit.",
+      "Fill in a judgement record for every assignment where you use AI.",
+      "Rehearse explaining every choice without notes."
+    ]
+  },
   project: "Late or Not?",
   levels: [
     {
@@ -19,42 +29,44 @@ JUDGE.boss = {
       title: "Your Name Is On It",
       blurb: "Five stages. One project. Your judgement record at the end.",
       minutes: 30,
+      howTo: "One complete mini-project in five stages: check the AI write-up against the code, cut the results slide, rewrite the summary, examine a viva answer, then write your judgement record.",
       stages: [
         {
-          id: "boss-hunt", type: "hunt", title: "Stage 1 — Hunt",
+          id: "boss-hunt", type: "claimcheck", title: "Stage 1 — Hunt",
           project: "Late or Not?",
-          brief: "The results section and notebook for 'Late or Not?'. 5 planted flaws.",
-          flawTypes: "default",
-          panels: [
-            {
-              title: "Report — Results", kind: "report", flaggable: true,
-              segments: [
-                { id: "h1", text: "We used 312,000 stop arrivals on 9 routes from January 2025 to February 2026." },
-                { id: "h2", text: "A bus counted as late if it arrived more than 5 minutes after the timetable; 21% of arrivals were late." },
-                { id: "h3", text: "Arrivals were split randomly into 80% training and 20% test data." },
-                { id: "h4", text: "Gradient boosting caught 74% of late arrivals, compared with 49% for logistic regression." },
-                { id: "h5", text: "Rainfall was the most important feature, proving that rain causes bus delays." },
-                { id: "h6", text: "As shown by Okafor (2024), real-time delay models reduce passenger complaints by 40%." },
-                { id: "h7", text: "Precision was 0.55, so just over half of 'late' warnings would be correct." },
-                { id: "h8", text: "The model can therefore be deployed on every bus network in the UK." }
-              ]
-            },
-            {
-              title: "Notebook — 03_model.ipynb", kind: "code", flaggable: true,
-              segments: [
-                { id: "g1", text: "X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True)" },
-                { id: "g2", text: "gb = GradientBoostingClassifier(random_state=1).fit(X_train, y_train)" },
-                { id: "g3", text: "print(classification_report(y_test, gb.predict(X_test)))" }
-              ]
-            },
-            { title: "Output", kind: "output", flaggable: false, text: "              precision    recall\non time            0.91      0.87\nlate               0.55      0.68" }
+          background: [
+            "Late or Not? predicts whether a bus will arrive more than 5 minutes late (fictional operator).",
+            "312,000 stop arrivals on 9 Hull routes, January 2025 – February 2026."
           ],
-          flaws: [
-            { id: "bf1", segs: ["h3", "g1"], type: "leakage", why: "A random shuffle puts stops from the SAME journey (and the same rainy afternoon) in both train and test. The model gets to peek at neighbours. Split by date: train on earlier months, test on later ones." },
-            { id: "bf2", segs: ["h4"], type: "mismatch", why: "The output says recall 0.68 for late buses, not 74%." },
-            { id: "bf3", segs: ["h5"], type: "causation", why: "Important to the model ≠ cause. Rain also means more passengers, more traffic and darker evenings." },
-            { id: "bf4", segs: ["h6"], type: "fabricated", why: "No such study. A specific author, year and percentage is exactly what a hallucinated citation looks like." },
-            { id: "bf5", segs: ["h8"], type: "overclaim", why: "Nine routes in one city, 14 months, one operator. That supports 'promising for these routes', not 'every network in the UK'." }
+          references: [
+            { cite: "Friedman (2001)", summary: "Introduced gradient boosting machines." }
+          ],
+          snippets: [
+            { id: "b1", title: "Cell 1 — prepare and split",
+              code: `df = df.sort_values("scheduled_time")
+          print(len(df), round(df["late"].mean(), 2))
+          X_train, X_test, y_train, y_test = train_test_split(
+              X, y, test_size=0.2, shuffle=True, random_state=1)`,
+              output: "312000 0.21",
+              claims: [
+                { id: "a", ok: true,  text: "We used 312,000 stop arrivals.", why: "Printed." },
+                { id: "b", ok: true,  text: "21% of arrivals were late.", why: "Printed." },
+                { id: "c", ok: true,  text: "20% of arrivals were held out for testing.", why: "test_size=0.2." },
+                { id: "d", ok: false, text: "We trained on the first 80% of the timeline and tested on the most recent 20%.", why: "The data is sorted by time, but shuffle=True then mixes it up randomly. Arrivals from the same journey and the same rainy afternoon land in both sets: leakage." },
+                { id: "e", ok: false, text: "The data covered all 23 bus routes in Hull.", why: "The project facts say 9 routes." }
+              ] },
+            { id: "b2", title: "Cell 2 — model and features",
+              code: `gb = GradientBoostingClassifier(random_state=1).fit(X_train, y_train)
+          print(classification_report(y_test, gb.predict(X_test), digits=2))
+          print(pd.Series(gb.feature_importances_, index=X.columns).nlargest(2).round(2))`,
+              output: "              precision  recall\non_time            0.91    0.87\nlate               0.55    0.68\n\nrain_mm        0.31\nhour_of_day    0.24",
+              claims: [
+                { id: "a", ok: true,  text: "Gradient boosting (Friedman, 2001) caught 68% of late arrivals.", why: "Late recall 0.68; correct citation." },
+                { id: "b", ok: true,  text: "Precision was 0.55, so just over half of 'late' warnings would be right.", why: "Late precision 0.55." },
+                { id: "c", ok: true,  text: "Time of day was the second most important feature.", why: "hour_of_day is second." },
+                { id: "d", ok: false, text: "Rainfall was the most important feature, proving that rain causes delays.", why: "Importance shows the model relies on rainfall, not that rain causes delays. Rain also brings more passengers and more traffic." },
+                { id: "e", ok: false, text: "The model can therefore be deployed on every bus network in the UK.", why: "Nine routes in one city over 14 months can't support a claim about every UK network." }
+              ] }
           ]
         },
         {
@@ -102,18 +114,44 @@ JUDGE.boss = {
           ]
         },
         {
-          id: "boss-viva", type: "roulette", title: "Stage 4 — Defend it", rounds: 2, seconds: 60,
-          fixedQuestions: [
-            { q: "What does recall 0.68 actually mean for a passenger waiting at a stop?", tag: "Explaining" },
-            { q: "Where is this model most likely to be wrong — and who pays for that mistake?", tag: "Limits" }
-          ],
-          caseProject: "Late or Not?"
+          id: "boss-viva", type: "examiner", title: "Stage 4 — Defend it",
+          rounds: [
+              {
+                id: "e5", project: "Late or Not?",
+                question: "What does recall 0.68 mean for a passenger?",
+                answer: "Of all the buses that really were late, we'd have warned about two in three, so a third of late buses would still catch people out. I'm not sure yet how annoying the false alarms would be, because precision is only 0.55, so I'd want to test it with real passengers before rolling it out.",
+                key: {
+                  A: { yes: true },
+                  B: { yes: true },
+                  C: { yes: true },
+                  D: { yes: true }
+                },
+                followups: [
+                  { text: "How would you design that test with passengers?", ok: true },
+                  { text: "What is precision?", ok: false },
+                  { text: "How many routes did you use?", ok: false }
+                ]
+              },
+              {
+                id: "e6", project: "Late or Not?",
+                question: "Where is your model most likely to be wrong?",
+                answer: "The model is very accurate, 82%, so it is unlikely to be wrong very often.",
+                key: {
+                  A: { yes: false },
+                  B: { yes: false },
+                  C: { yes: false, why: "82% is used as reassurance without saying what it means" },
+                  D: { yes: false }
+                },
+                followups: [
+                  { text: "79% of buses are on time. How accurate would a model be that always says 'on time'?", ok: true },
+                  { text: "What is accuracy?", ok: false },
+                  { text: "Which features did you use?", ok: false }
+                ]
+              }
+            ]
         },
         { id: "boss-record", type: "record", title: "Stage 5 — Judgement record" }
       ]
     }
   ]
 };
-
-JUDGE.CASE_SUMMARIES = JUDGE.CASE_SUMMARIES || {};
-JUDGE.CASE_SUMMARIES["Late or Not?"] = "Predicts which buses on 9 Hull routes will arrive more than 5 minutes late. 312,000 arrivals over 14 months; 21% late. Gradient boosting recall 0.68 (baseline 0.49), precision 0.55. Its main flaw: a random split that leaks between train and test.";

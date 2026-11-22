@@ -15,7 +15,8 @@
   C.progress = (i, n, label) => h("div", { class: "progress" },
     h("div", { class: "progress-text" }, (label || "Item") + " " + (i + 1) + " of " + n),
     h("div", { class: "progress-bar" }, h("span", { style: { width: (100 * i) / n + "%" } })));
-  C.seg = function (options, onChange, name, cls) {
+  /* `initial` pre-selects an option (used when resuming) and calls onChange with it. */
+  C.seg = function (options, onChange, name, cls, initial) {
     const wrap = h("div", { class: "seg " + (cls || ""), role: "group", "aria-label": name || "" });
     options.forEach(([val, label]) => {
       const b = h("button", { type: "button", "aria-pressed": "false" }, label);
@@ -25,6 +26,7 @@
         onChange(val);
       });
       wrap.appendChild(b);
+      if (initial != null && initial === val) { b.setAttribute("aria-pressed", "true"); setTimeout(() => onChange(val), 0); }
     });
     return wrap;
   };
@@ -62,20 +64,64 @@
     };
   };
   C.reveal = (title, ...kids) => h("div", { class: "reveal" }, h("div", { class: "reveal-title" }, title), kids);
-  C.projectTag = (p) => (p ? C.tag(p, "project") : null);
+  /* A project tag. If the project has a brief in JUDGE.PROJECTS, the tag is a button that opens "About this project". */
+  C.projectTag = function (p, opts) {
+    if (!p) return null;
+    const brief = (J.PROJECTS || {})[p];
+    if (!brief) return C.tag(p, "project");
+    const rows = [["Goal", brief.goal], ["Data", brief.data], ["Methods", brief.methods], ["Results", brief.results], ["Audience", brief.audience]];
+    const panel = h("div", { class: "project-brief", role: "region", "aria-label": "About this project: " + p, hidden: !(opts && opts.open) },
+      h("div", { class: "panel-title" }, "About this project: " + p),
+      h("dl", null, rows.map(([k, v]) => [h("dt", null, k), h("dd", null, v)])));
+    const btn = h("button", { type: "button", class: "tag project as-btn", "aria-expanded": panel.hidden ? "false" : "true", title: "About this project" }, p);
+    btn.addEventListener("click", () => { panel.hidden = !panel.hidden; btn.setAttribute("aria-expanded", panel.hidden ? "false" : "true"); });
+    return h("span", { class: "project-tag-wrap" }, btn, panel);
+  };
   C.lesson = (text) => (text ? h("div", { class: "lesson" }, h("strong", null, "Takeaway"), " ", text) : null);
   C.scrollTop = (root) => { try { root.scrollIntoView({ block: "start", behavior: U.reduceMotion ? "auto" : "smooth" }); } catch (e) {} };
 
-  /* Run a list of items one at a time, collecting score. */
-  function sequence(root, items, showFn, endFn) {
-    let i = 0, score = 0, max = 0;
+  /* How many items a level has (null for single-screen levels). */
+  J.levelSize = (L) => (L.items || L.duels || L.slides || L.paragraphs || L.problems || L.questions || L.cases || L.stages || L.snippets || (Array.isArray(L.rounds) ? L.rounds : null) || []).length || (Array.isArray(L.rounds) ? L.rounds.length : L.rounds) || null;
+
+  /* Run a list of items one at a time, collecting score.
+     cp = { ctx, collect(), restore(state) } turns on checkpoints: the position, score and
+     whatever collect() returns are saved after every item, and free-text drafts are saved
+     (debounced) with seq.draft({...}). When resuming, seq.saved holds the saved draft for
+     the item being shown. */
+  function sequence(root, items, showFn, endFn, cp) {
+    const store = cp && cp.ctx.checkpoint;
+    let i = 0, score = 0, max = 0, draft = {}, closed = false, finished = false, timer = null;
+    const saved = store && store.load();
+    if (saved && saved.itemIndex != null && saved.itemIndex < items.length) {
+      i = saved.itemIndex; score = saved.score || 0; max = saved.max || 0;
+      draft = (saved.data && saved.data.draft) || {};
+      cp.restore && cp.restore((saved.data && saved.data.state) || {});
+    }
+    function persist() {
+      clearTimeout(timer); timer = null;
+      if (!store || finished) return;
+      store.save({ state: cp.collect ? cp.collect() : {}, draft }, { itemIndex: i, score, max });
+    }
     const api = {
-      add(s, m) { score += s; max += m; },
-      next() { i++; if (i < items.length) { U.clear(root); showFn(items[i], i, api); C.scrollTop(root); } else endFn(score, max); },
+      saved: draft,
+      add(s, m) {
+        score += s; max += m; closed = true; clearTimeout(timer); timer = null;
+        if (cp && cp.ctx.itemDone) cp.ctx.itemDone(i, s, m);
+      },
+      next() {
+        i++; draft = {}; closed = false;
+        if (i < items.length) { persist(); U.clear(root); showFn(items[i], i, api); C.scrollTop(root); }
+        else { finished = true; endFn(score, max); }
+      },
+      /* Save a free-text draft for the current item (after 500 ms of quiet). */
+      draft(part) { Object.assign(draft, part); if (store && !closed && !finished) { clearTimeout(timer); timer = setTimeout(persist, 500); } },
+      draftNow(part) { Object.assign(draft, part); if (!closed) persist(); },
       get i() { return i; }
     };
+    if (store) store.onLeave(() => { if (timer) persist(); });
     U.clear(root);
-    showFn(items[0], 0, api);
+    showFn(items[i], i, api);
+    api.saved = {};
     return api;
   }
 
@@ -84,7 +130,10 @@
   E.rate = function (root, L, ctx) {
     const byOrigin = {};
     let originRight = 0;
+    const briefShown = {};
     sequence(root, L.items, (it, i, seq) => {
+      const firstOfProject = !!it.project && !briefShown[it.project];
+      briefShown[it.project] = true;
       const ans = { crit: {}, origin: null, chips: 0 };
       const lock = C.btn("Lock in my judgement", reveal, "primary", { disabled: true });
       const check = () => { lock.disabled = !(L.criteria.every((c) => ans.crit[c.id]) && ans.origin && ans.chips); };
@@ -99,7 +148,7 @@
         lock);
       root.append(C.progress(i, L.items.length, "Artefact"),
         h("div", { class: "split" },
-          h("div", { class: "artefact-col" }, h("div", { class: "artefact-head" }, C.tag(R.kindLabel[it.kind]), C.projectTag(it.project), h("span", { class: "artefact-label" }, it.label)), R.artefact(it)),
+          h("div", { class: "artefact-col" }, h("div", { class: "artefact-head" }, C.tag(R.kindLabel[it.kind]), C.projectTag(it.project, { open: firstOfProject }), h("span", { class: "artefact-label" }, it.label)), R.artefact(it)),
           panel));
 
       function reveal() {
@@ -140,19 +189,29 @@
         summary: ["You named the origin correctly " + originRight + " times out of " + L.items.length + "."].concat(lines),
         lesson: "Origin told you very little about quality. There was excellent AI work and weak human work. The skill that matters is judging the work in front of you — not guessing where it came from."
       });
+    }, {
+      ctx,
+      collect: () => ({ byOrigin, originRight, briefShown }),
+      restore: (s) => { Object.assign(byOrigin, s.byOrigin); originRight = s.originRight || 0; Object.assign(briefShown, s.briefShown); }
     });
   };
 
   E.duel = function (root, L, ctx) {
     let right = 0;
+    /* The data always lists the stronger version second. Swap sides at random, balanced
+       across the run, and keep the swaps in the checkpoint so a resumed level is stable. */
+    let swaps = U.shuffle(L.duels.map((_, k) => k < Math.floor(L.duels.length / 2)));
     sequence(root, L.duels, (d, i, seq) => {
+      const swap = swaps[i];
+      const shown = swap ? { a: d.b, b: d.a } : { a: d.a, b: d.b };
+      const better = swap ? (d.better === "a" ? "b" : "a") : d.better; /* screen side of the stronger version */
       const ans = { pick: null, reason: null, chips: 0 };
       const lock = C.btn("Lock in", reveal, "primary", { disabled: true });
       const check = () => { lock.disabled = !(ans.pick && ans.reason && ans.chips); };
       const side = (key, x) => h("div", { class: "duel-side", dataset: { side: key } },
         h("div", { class: "duel-label" }, key.toUpperCase()),
         x.kind === "slide" ? R.slide(x.content, { small: true }) : x.kind === "code" ? R.code(x.content) : h("div", { class: "doc" }, h("p", null, x.content)));
-      const sides = h("div", { class: "duel" }, side("a", d.a), side("b", d.b));
+      const sides = h("div", { class: "duel" }, side("a", shown.a), side("b", shown.b));
       const reasonSel = h("select", { id: L.id + "-" + d.id + "-reason" }, h("option", { value: "" }, "Choose the main reason…"), L.reasons.map((r) => h("option", { value: r.id }, r.label)));
       reasonSel.addEventListener("change", () => { ans.reason = reasonSel.value || null; check(); });
       const panel = h("div", { class: "controls wide" },
@@ -164,20 +223,20 @@
       root.append(C.progress(i, L.duels.length, "Duel"), h("p", { class: "prompt" }, d.prompt), sides, panel);
 
       function reveal() {
-        const ok = ans.pick === d.better, rOk = ans.reason === d.reason;
+        const ok = ans.pick === better, rOk = ans.reason === d.reason;
         if (ok) right++;
         ctx.bet(C.CONF_P[ans.chips], ok);
         let pts = (ok ? 6 : 0) + (ok && rOk ? 4 : 0) + (ok ? ans.chips : -ans.chips);
         pts = Math.max(0, pts);
         seq.add(pts, 13);
-        sides.querySelector('[data-side="' + d.better + '"]').classList.add("winner");
+        sides.querySelector('[data-side="' + better + '"]').classList.add("winner");
         sides.querySelectorAll(".duel-side").forEach((s) => {
-          const o = d[s.dataset.side].origin;
+          const o = shown[s.dataset.side].origin;
           s.querySelector(".duel-label").append(" ", h("span", { class: "origin-badge o-" + o }, R.originLabel[o]));
         });
         const reasonLabel = L.reasons.find((r) => r.id === d.reason).label;
         U.clear(panel);
-        panel.append(C.reveal(ok ? "Yes — " + d.better.toUpperCase() + " is better" : "Not this time — " + d.better.toUpperCase() + " is better",
+        panel.append(C.reveal(ok ? "Yes — " + better.toUpperCase() + " is the stronger version" : "Not this time — " + better.toUpperCase() + " is the stronger version",
           h("p", null, h("strong", null, "Main reason: "), reasonLabel, rOk && ok ? " (you got the reason too)" : ""),
           h("p", null, d.why)),
           h("div", { class: "row-end" }, h("span", { class: "sum" }, "This duel: ", C.pts(pts)), C.btn(i + 1 < L.duels.length ? "Next duel" : "See my results", seq.next)));
@@ -185,7 +244,7 @@
     }, (score, max) => {
       ctx.log([L.title + ": picked the stronger version in " + right + "/" + L.duels.length + " duels."]);
       ctx.finish({ score, max, summary: ["You picked the stronger version " + right + " times out of " + L.duels.length + ". Look at the origin labels: the better version was sometimes AI, sometimes human."], lesson: "Good work states its point, fits its own project, and stays consistent. None of those depend on who — or what — wrote it." });
-    });
+    }, { ctx, collect: () => ({ right, swaps }), restore: (s) => { right = s.right || 0; if (s.swaps && s.swaps.length === L.duels.length) swaps = s.swaps; } });
   };
 
   /* ======================= WORLD 2 ======================= */
@@ -196,12 +255,13 @@
     const flags = {};
     const segEls = {};
     let active = null;
+    const keep = () => ctx.checkpoint.save({ flags }, { itemIndex: null });
 
     const counter = h("span", { class: "flag-count" }, "0 flags");
     const submit = C.btn("Submit my flags", evaluate);
     const sheetText = h("p", { class: "sheet-text" });
     const sheetTypes = h("div", { class: "sheet-types" });
-    const removeBtn = C.btn("Remove flag", () => { delete flags[active]; paint(active); close(); }, "ghost small");
+    const removeBtn = C.btn("Remove flag", () => { delete flags[active]; paint(active); keep(); close(); }, "ghost small");
     const sheet = h("div", { class: "sheet", hidden: true, role: "dialog", "aria-label": "Choose the problem" },
       h("div", { class: "sheet-inner" },
         h("div", { class: "sheet-head" }, h("strong", null, "What's wrong here?"), C.btn("Cancel", () => close(), "ghost small")),
@@ -211,7 +271,7 @@
       active = id;
       sheetText.textContent = text.trim() ? "“" + text.trim() + "”" : "(blank line)";
       U.clear(sheetTypes);
-      types.forEach((t) => sheetTypes.appendChild(h("button", { type: "button", class: "type-btn" + (flags[id] === t.id ? " on" : ""), onClick: () => { flags[id] = t.id; paint(id); close(); } }, t.label)));
+      types.forEach((t) => sheetTypes.appendChild(h("button", { type: "button", class: "type-btn" + (flags[id] === t.id ? " on" : ""), onClick: () => { flags[id] = t.id; paint(id); keep(); close(); } }, t.label)));
       removeBtn.hidden = !flags[id];
       sheet.hidden = false;
       const first = sheetTypes.querySelector("button");
@@ -257,6 +317,9 @@
       h("div", { class: "hunt-grid" + (L.variant === "context" ? " context" : "") }, panels),
       h("div", { class: "actionbar" }, counter, submit),
       sheet);
+
+    const priorFlags = ((ctx.checkpoint.load() || {}).data || {}).flags || {};
+    Object.entries(priorFlags).forEach(([id, type]) => { if (segEls[id]) { flags[id] = type; paint(id); } });
 
     function evaluate() {
       const segToFlaw = {};
@@ -314,20 +377,76 @@
     }
   };
 
+  /* Five claims about a notebook cell; exactly two are hallucinations. The player picks two. */
+  E.claimcheck = function (root, L, ctx) {
+    let found = 0, total = 0;
+    const pinned = () => h("details", { class: "facts-card pinned", open: window.innerWidth > 700 },
+      h("summary", null, "Project facts and references"),
+      L.background && L.background.length ? C.list(L.background) : null,
+      L.references && L.references.length ? [h("div", { class: "panel-title" }, "Reference list"), h("ul", { class: "list refs" }, L.references.map((r) => h("li", null, h("strong", null, r.cite), " — ", r.summary)))] : null);
+    sequence(root, L.snippets, (sn, i, seq) => {
+      const picked = new Set();
+      const count = h("span", { class: "pick-count" }, "0 of 2 picked");
+      const check = C.btn("Check my two picks", reveal, "primary", { disabled: true });
+      const cards = U.shuffle(sn.claims).map((c) => {
+        const b = h("button", { type: "button", class: "claim-pick", "aria-pressed": "false" }, h("span", { class: "claim-mark", "aria-hidden": "true" }), h("span", { class: "claim-body" }, c.text));
+        b.addEventListener("click", () => {
+          if (picked.has(c.id)) picked.delete(c.id);
+          else if (picked.size < 2) picked.add(c.id);
+          else { count.classList.add("shake"); setTimeout(() => count.classList.remove("shake"), 400); return; }
+          b.setAttribute("aria-pressed", picked.has(c.id) ? "true" : "false");
+          count.textContent = picked.size + " of 2 picked";
+          check.disabled = picked.size !== 2;
+        });
+        return { c, b, wrap: h("div", { class: "claim-card" }, b) };
+      });
+      const controls = h("div", { class: "controls" },
+        C.step(1, "Which two sentences are hallucinations?"),
+        h("p", { class: "hint" }, "Pick exactly two. Check each sentence against the code, the output, the project facts and the reference list."),
+        h("div", { class: "claim-list" }, cards.map((x) => x.wrap)), count, check);
+      root.append(pinned(), C.progress(i, L.snippets.length, "Cell"),
+        h("div", { class: "split" },
+          h("div", { class: "artefact-col" }, h("div", { class: "panel-title" }, sn.title), R.code(sn.code), h("div", { class: "panel-title" }, "Output"), h("pre", { class: "output" }, sn.output)),
+          controls));
+
+      function reveal() {
+        let pts = 0, hits = 0;
+        cards.forEach(({ c, b, wrap }) => {
+          const chosen = picked.has(c.id);
+          b.disabled = true;
+          if (!c.ok && chosen) { pts += 10; hits++; }
+          wrap.dataset.state = !c.ok ? (chosen ? "hit" : "missed") : chosen ? "falsepick" : "fine";
+          wrap.append(h("p", { class: "claim-why" }, h("strong", null, c.ok ? "✓ Supported" : "✗ Hallucination"), chosen ? (c.ok ? " (you picked this one)" : " (you found it)") : !c.ok ? " (you missed it)" : "", " — ", c.why));
+        });
+        found += hits; total += 2;
+        seq.add(pts, 20);
+        check.remove(); count.remove();
+        controls.append(h("div", { class: "row-end" }, h("span", { class: "sum" }, "This cell: ", C.pts(pts)), C.btn(i + 1 < L.snippets.length ? "Next cell" : "See my results", seq.next)));
+      }
+    }, (score, max) => {
+      if (found === total) ctx.award("sharp-eye");
+      ctx.log([L.title + ": found " + found + " of " + total + " hallucinations across " + L.snippets.length + " cells."]);
+      ctx.finish({ score, max, summary: ["You found " + found + " of " + total + " hallucinations."], lesson: L.lesson || "Every number traces to an output. Every citation says what you cite it for. Every claim stays inside the evidence." });
+    }, { ctx, collect: () => ({ found, total }), restore: (s) => { found = s.found || 0; total = s.total || 0; } });
+  };
+
   E.court = function (root, L, ctx) {
     const ans = {};
+    const prior = ((ctx.checkpoint.load() || {}).data || {}).ans || {};
+    const keep = () => ctx.checkpoint.save({ ans }, { itemIndex: null });
     const submit = C.btn("Deliver my verdicts", evaluate, "primary", { disabled: true });
     const check = () => { submit.disabled = !L.claims.every((c) => ans[c.id] && ans[c.id].verdict && (ans[c.id].verdict === "unsupported" || ans[c.id].cell)); };
     const cellOpts = L.cells.map((c) => [c.id, c.title]);
     const claimEls = L.claims.map((c, n) => {
-      ans[c.id] = { verdict: null, cell: null };
+      ans[c.id] = Object.assign({ verdict: null, cell: null }, prior[c.id]);
       const sel = h("select", { id: L.id + "-" + c.id + "-cell" }, h("option", { value: "" }, "Which cell is the evidence?"), cellOpts.map(([id, t]) => h("option", { value: id }, t)));
       const evid = C.field("Evidence", sel);
-      evid.hidden = true;
-      sel.addEventListener("change", () => { ans[c.id].cell = sel.value || null; check(); });
+      evid.hidden = !(ans[c.id].verdict && ans[c.id].verdict !== "unsupported");
+      sel.value = ans[c.id].cell || "";
+      sel.addEventListener("change", () => { ans[c.id].cell = sel.value || null; check(); keep(); });
       const card = h("div", { class: "claim", dataset: { id: c.id } },
         h("div", { class: "claim-text" }, h("span", { class: "claim-n" }, n + 1), "“" + c.text + "”"),
-        C.seg([["supported", "Supported"], ["contradicted", "Contradicted"], ["unsupported", "No evidence"]], (v) => { ans[c.id].verdict = v; evid.hidden = v === "unsupported"; check(); }, "Verdict", "verdict"),
+        C.seg([["supported", "Supported"], ["contradicted", "Contradicted"], ["unsupported", "No evidence"]], (v) => { ans[c.id].verdict = v; evid.hidden = v === "unsupported"; check(); keep(); }, "Verdict", "verdict", ans[c.id].verdict),
         evid);
       return card;
     });
@@ -383,6 +502,8 @@
         submit.disabled = kept.size === 0 || w < 3;
       };
       headline.addEventListener("input", update);
+      headline.addEventListener("input", () => seq.draft({ headline: headline.value }));
+      if (seq.saved.headline) headline.value = seq.saved.headline;
       const slideEl = R.slide(s.slide, {
         tokens: true,
         onToken(id, b) {
@@ -434,7 +555,7 @@
       if (keptKeyAll) ctx.award("three-numbers");
       ctx.log([L.title + ": cut crowded slides to three numbers and rewrote titles as findings.", "Headlines I wrote: " + headlines.join("; ")]);
       ctx.finish({ score, max, summary: ["Your headlines:"].concat(headlines), lesson: "Every number on a slide is a number you'll be tempted to read aloud. Keep the ones that answer the question; make the title say what they mean." });
-    });
+    }, { ctx, collect: () => ({ keptKeyAll, headlines }), restore: (s) => { keptKeyAll = s.keptKeyAll !== false; headlines.push(...(s.headlines || [])); } });
   };
 
   E.jargon = function (root, L, ctx) {
@@ -466,6 +587,8 @@
         return { w, b, terms, kept, fr };
       }
       ta.addEventListener("input", measure);
+      ta.addEventListener("input", () => seq.draft({ rewrite: ta.value }));
+      if (seq.saved.rewrite != null) ta.value = seq.saved.rewrite;
       root.append(C.progress(i, L.paragraphs.length, "Paragraph"),
         h("div", { class: "split jargon" },
           h("div", { class: "artefact-col" }, h("div", { class: "artefact-head" }, C.tag("Original"), C.projectTag(p.project), h("span", { class: "artefact-label" }, p.label)), orig,
@@ -501,7 +624,7 @@
     }, (score, max) => {
       ctx.log([L.title + ": rewrote inflated paragraphs into plain, consistent English.", ...rewrites]);
       ctx.finish({ score, max, summary: rewrites, lesson: "Jargon isn't just hard to read. It's where unproven claims hide. When you cut it, check whether a claim went with it — and whether it deserved to." });
-    });
+    }, { ctx, collect: () => ({ rewrites }), restore: (s) => { rewrites = s.rewrites || []; } });
   };
   function markBanned(text, banned) {
     let out = U.esc(text);
@@ -516,11 +639,13 @@
     const notes = [];
     sequence(root, L.slides, (s, i, seq) => {
       const showFor = ctx.timers ? L.seconds : 30;
+      const resumeSay = seq.saved.say;
       const stage = h("div", { class: "flash-stage" });
       root.append(C.progress(i, L.slides.length, "Slide"),
         h("div", { class: "brief" }, C.projectTag(s.project), h("p", null, "You'll see a slide for ", h("strong", null, showFor + " seconds"), ". Then it disappears and you write what you'd SAY about it — as if you were presenting, with no notes.")),
         stage);
-      stage.append(h("div", { class: "flash-ready" }, C.btn("Show me the slide", go)));
+      if (resumeSay != null) hide(resumeSay); /* already seen the slide: carry on writing */
+      else stage.append(h("div", { class: "flash-ready" }, C.btn("Show me the slide", go)));
 
       function go() {
         U.clear(stage);
@@ -528,9 +653,11 @@
         stage.append(t.el, R.slide(s.slide), h("div", { class: "row-end" }, C.btn("I've got it — hide it", () => { t.stop(); hide(); }, "ghost")));
         t.start();
       }
-      function hide() {
+      function hide(prefill) {
         U.clear(stage);
-        const ta = C.textarea(L.id + "-" + s.id + "-say", "What would you say to the room? Two to four sentences.", 6);
+        const ta = C.textarea(L.id + "-" + s.id + "-say", "What would you say to the room? Two to four sentences.", 6, typeof prefill === "string" ? prefill : "");
+        ta.addEventListener("input", () => seq.draft({ say: ta.value }));
+        seq.draft({ say: ta.value });
         const wt = C.timer(L.writeSeconds, null, !ctx.timers);
         stage.append(h("div", { class: "flash-hidden" }, h("p", { class: "flash-gone" }, "The slide is gone."), ctx.timers ? wt.el : null, C.field("What you'd say", ta), h("div", { class: "row-end" }, C.btn("Submit", () => { wt.stop(); score(ta.value); }))));
         if (ctx.timers) wt.start();
@@ -561,23 +688,34 @@
     }, (score, max) => {
       ctx.log([L.title + ": explained slides from memory, focusing on meaning over numbers.", ...notes]);
       ctx.finish({ score, max, summary: notes, lesson: "In the viva the report isn't in front of you. If you can't say what a slide means after ten seconds, your audience can't either — and you'll end up reading it aloud." });
-    });
+    }, { ctx, collect: () => ({ notes }), restore: (s) => { notes.push(...(s.notes || [])); } });
   };
 
   /* ======================= WORLD 4 ======================= */
 
+  /* Pick exactly two of five reasons for rejecting each alternative. */
   E.whynot = function (root, L, ctx) {
     const kept = [];
     sequence(root, L.cases, (c, i, seq) => {
-      const id = (k) => L.id + "-" + c.id + "-" + k;
-      const alt1 = h("input", { id: id("alt1"), type: "text", placeholder: "e.g. logistic regression" }), why1 = C.textarea(id("why1"), "Why not? Use facts from the project.", 3);
-      const alt2 = h("input", { id: id("alt2"), type: "text", placeholder: "e.g. a neural network" }), why2 = C.textarea(id("why2"), "Why not? Use facts from the project.", 3);
-      const submit = C.btn("Defend it", evaluate, "primary", { disabled: true });
-      const check = () => { submit.disabled = !(alt1.value.trim() && alt2.value.trim() && U.wordCount(why1.value) >= 5 && U.wordCount(why2.value) >= 5); };
-      [alt1, why1, alt2, why2].forEach((x) => x.addEventListener("input", check));
-      const form = h("div", { class: "controls" },
-        C.step(1, "First alternative you rejected"), C.field("Alternative", alt1), C.field("Why not", why1),
-        C.step(2, "Second alternative you rejected"), C.field("Alternative", alt2), C.field("Why not", why2), submit);
+      const groups = c.alternatives.map((alt, a) => {
+        const picked = new Set();
+        const count = h("span", { class: "pick-count" }, "0 of 2 picked");
+        const rows = U.shuffle(alt.options.map((o, k) => Object.assign({ k }, o))).map((o) => {
+          const b = h("button", { type: "button", class: "claim-pick", "aria-pressed": "false" }, h("span", { class: "claim-mark", "aria-hidden": "true" }), h("span", { class: "claim-body" }, o.text));
+          b.addEventListener("click", () => {
+            if (picked.has(o.k)) picked.delete(o.k);
+            else if (picked.size < 2) picked.add(o.k);
+            else { count.classList.add("shake"); setTimeout(() => count.classList.remove("shake"), 400); return; }
+            b.setAttribute("aria-pressed", picked.has(o.k) ? "true" : "false");
+            count.textContent = picked.size + " of 2 picked";
+            submit.disabled = !groups.every((g) => g.picked.size === 2);
+          });
+          return { o, b, wrap: h("div", { class: "claim-card" }, b) };
+        });
+        return { alt, picked, count, rows, el: h("div", { class: "alt-group" }, C.step(a + 1, "Alternative: " + alt.name), h("p", { class: "hint" }, "Choose the two reasons that genuinely justify rejecting it."), h("div", { class: "claim-list" }, rows.map((r) => r.wrap)), count) };
+      });
+      const submit = C.btn("Check my reasons", evaluate, "primary", { disabled: true });
+      const form = h("div", { class: "controls" }, groups.map((g) => g.el), submit);
       root.append(C.progress(i, L.cases.length, "Decision"),
         h("div", { class: "split" },
           h("div", { class: "artefact-col" },
@@ -587,118 +725,99 @@
           form));
 
       function evaluate() {
-        const all = [why1.value, why2.value].join(" ");
-        const hits = c.factKeys.filter((f) => U.containsAny(all, f.any));
-        const generic = U.findTerms(all, J.GENERIC_PHRASES, false);
-        const fp = Math.min(4, hits.length) * 8, gp = Math.max(-12, -4 * generic.length), fill = 10;
-        [alt1, why1, alt2, why2].forEach((x) => (x.disabled = true));
+        let pts = 0, right = 0;
+        groups.forEach((g) => g.rows.forEach(({ o, b, wrap }) => {
+          const chosen = g.picked.has(o.k);
+          b.disabled = true;
+          if (chosen && o.ok) { pts += 10; right++; }
+          wrap.dataset.state = o.ok ? (chosen ? "hit" : "missed") : chosen ? "falsepick" : "fine";
+          wrap.append(h("p", { class: "claim-why" }, h("strong", null, o.ok ? "✓ Good reason" : "✗ Not a good reason"), chosen ? " (you picked this)" : "", " — ", o.why));
+        }));
+        groups.forEach((g) => g.count.remove());
         submit.remove();
-        const self1 = h("input", { type: "checkbox", id: id("self1") }), self2 = h("input", { type: "checkbox", id: id("self2") });
-        const finish = C.btn(i + 1 < L.cases.length ? "Next decision" : "See my results", () => {
-          const sp = (self1.checked ? 4 : 0) + (self2.checked ? 4 : 0);
-          const total = Math.max(0, fp + gp + fill + sp);
-          seq.add(total, 50);
-          kept.push(c.project + ": rejected " + alt1.value.trim() + " and " + alt2.value.trim() + " using " + hits.length + " project facts");
-          seq.next();
-        });
+        seq.add(pts, 40);
+        const viva = C.textarea(L.id + "-" + c.id + "-viva", "Optional. Not scored.", 2);
         form.append(
-          C.reveal("Your reasoning used " + hits.length + " project fact" + (hits.length === 1 ? "" : "s"),
-            hits.length ? C.list(hits.map((x) => x.label), "list ticks") : h("p", null, "None of the project's facts appeared in your reasons. Look at the list on the left — those are what make a reason specific."),
-            generic.length ? h("p", { class: "warn-text" }, "Generic phrases spotted: " + generic.join(", ") + " ", C.pts(gp)) : null),
+          C.reveal("You chose " + right + " of the 4 good reasons", h("p", null, "Each right pick is worth 10 points.")),
           C.reveal("A typical AI answer to the same question", h("p", { class: "quote ai" }, c.aiAnswer), h("p", { class: "hint" }, "Fluent. Plausible. Could be pasted into any project.")),
           C.reveal("What a strong answer sounds like", h("p", { class: "quote" }, c.expert)),
-          C.reveal("Be honest with yourself",
-            h("label", { class: "check" }, self1, " My reason for rejecting ", h("strong", null, alt1.value.trim()), " only makes sense for THIS project"),
-            h("label", { class: "check" }, self2, " My reason for rejecting ", h("strong", null, alt2.value.trim()), " only makes sense for THIS project")),
-          h("div", { class: "row-end" }, finish));
-      }
-    }, (score, max) => {
-      ctx.log([L.title + ": defended model choices against alternatives using project-specific facts.", ...kept]);
-      ctx.finish({ score, max, summary: kept, lesson: "A reason is specific if it would be wrong for a different project. 'XGBoost handles our 18% missing lab values' is specific. 'XGBoost is powerful' is not." });
-    });
-  };
-
-  E.roulette = function (root, L, ctx) {
-    const rounds = L.rounds || 3, secs = L.seconds || 60;
-    let project = L.caseProject || null, partner = true, r = 0, score = 0;
-    const faced = [];
-    const pool = U.shuffle(J.VIVA_QUESTIONS);
-    setup();
-
-    function setup() {
-      U.clear(root);
-      if (L.caseProject) { start(); return; }
-      const own = h("input", { id: L.id + "-own", type: "text", placeholder: "Your project's title" });
-      const choices = Object.keys(J.CASE_SUMMARIES).filter((k) => k !== "Late or Not?");
-      let pick = null;
-      const go = C.btn("Start the viva", () => { project = pick === "own" ? own.value.trim() || "My project" : pick; start(); }, "primary", { disabled: true });
-      const chk = () => { go.disabled = !pick || (pick === "own" && !own.value.trim()); };
-      own.addEventListener("input", chk);
-      root.append(h("div", { class: "brief" },
-        h("p", null, "Work in pairs if you can. One of you answers out loud — no notes, no laptop, no report. The other listens and scores you on four things. Then swap."),
-        C.step(1, "Which project are you defending?"),
-        C.seg([["own", "My own project"]].concat(choices.map((k) => [k, k])), (v) => { pick = v; own.hidden = v !== "own"; chk(); }, "Project", "projects"),
-        own,
-        C.step(2, "How are you playing?"),
-        C.seg([["pair", "With a partner"], ["solo", "On my own (self-score)"]], (v) => (partner = v === "pair"), "Mode", "mode"),
-        h("div", { class: "row-end" }, go)));
-      own.hidden = true;
-    }
-    function start() { r = 0; round(); }
-    function round() {
-      U.clear(root);
-      const q = L.fixedQuestions ? L.fixedQuestions[r] : pool[r % pool.length];
-      const wheel = h("div", { class: "wheel" }, h("span", { class: "wheel-tag" }, "?"), h("p", { class: "wheel-q" }, "Spin to get your question"));
-      const summary = project && J.CASE_SUMMARIES[project] ? h("div", { class: "facts-card" }, h("div", { class: "panel-title" }, project), h("p", null, J.CASE_SUMMARIES[project]), h("p", { class: "hint" }, "Read this once, then put it away.")) : h("div", { class: "facts-card" }, h("div", { class: "panel-title" }, "Defending: " + project));
-      const spin = C.btn("Spin", doSpin);
-      root.append(C.progress(r, rounds, "Round"), summary, wheel, h("div", { class: "row-end" }, spin));
-      function doSpin() {
-        spin.remove();
-        const qs = J.VIVA_QUESTIONS;
-        let n = 0;
-        const steps = U.reduceMotion ? 0 : 14;
-        const tick = () => {
-          if (n < steps) {
-            const x = qs[Math.floor(Math.random() * qs.length)];
-            wheel.querySelector(".wheel-q").textContent = x.q;
-            wheel.querySelector(".wheel-tag").textContent = x.tag;
-            n++;
-            setTimeout(tick, 40 + n * 12);
-          } else land();
-        };
-        wheel.classList.add("spinning");
-        tick();
-      }
-      function land() {
-        wheel.classList.remove("spinning");
-        wheel.classList.add("landed");
-        wheel.querySelector(".wheel-q").textContent = q.q;
-        wheel.querySelector(".wheel-tag").textContent = q.tag;
-        const t = C.timer(secs, null, !ctx.timers);
-        const done = C.btn("Answer finished", () => { t.stop(); scoreIt(); });
-        root.append(h("p", { class: "hint center" }, partner ? "Answerer: speak now. Partner: listen — don't help." : "Say your answer out loud. Really out loud."), ctx.timers ? t.el : null, h("div", { class: "row-end" }, done));
-        if (ctx.timers) t.start();
-      }
-      function scoreIt() {
-        U.clear(root);
-        const boxes = J.VIVA_CHECKLIST.map((c) => { const b = h("input", { type: "checkbox", id: L.id + "-r" + r + "-" + c.id }); return { c, b }; });
-        root.append(C.progress(r, rounds, "Round"),
-          h("div", { class: "wheel landed small" }, h("span", { class: "wheel-tag" }, q.tag), h("p", { class: "wheel-q" }, q.q)),
-          C.reveal(partner ? "Partner: tick what they did" : "Be honest: tick what you did", boxes.map(({ c, b }) => h("label", { class: "check" }, b, " ", c.label))),
-          h("div", { class: "row-end" }, C.btn(r + 1 < rounds ? "Next round" : "Finish the viva", () => {
-            const ticks = boxes.filter((x) => x.b.checked).length;
-            score += ticks * 5;
-            if (boxes.find((x) => x.c.id === "honest").b.checked) ctx.award("honest-idk");
-            faced.push(q.q + " — " + ticks + "/4");
-            r++;
-            if (r < rounds) round(); else end();
+          C.field("In one sentence, how would you say this in a viva?", viva, "Optional and unscored."),
+          h("div", { class: "row-end" }, h("span", { class: "sum" }, "This decision: ", C.pts(pts)), C.btn(i + 1 < L.cases.length ? "Next decision" : "See my results", () => {
+            kept.push(c.project + ": rejected " + c.alternatives.map((g) => g.name).join(" and ") + " (" + right + "/4 good reasons)" + (viva.value.trim() ? ". In a viva I'd say: “" + viva.value.trim() + "”" : ""));
+            seq.next();
           })));
       }
-    }
-    function end() {
-      ctx.log([L.title + ": answered " + rounds + " viva questions out loud, without notes, on " + project + ".", ...faced]);
-      ctx.finish({ score, max: rounds * 20, summary: faced, lesson: "Answer the question that was asked, make it about your project, and say what numbers mean. 'I'm not sure — here's how I'd check' is a strong answer, not a weak one." });
-    }
+    }, (score, max) => {
+      ctx.log([L.title + ": chose project-specific reasons for rejecting alternatives.", ...kept]);
+      ctx.finish({ score, max, summary: kept, lesson: "A reason is specific if it would be wrong for a different project. 'XGBoost handles our 18% missing lab values' is specific. 'XGBoost is powerful' is not." });
+    }, { ctx, collect: () => ({ kept }), restore: (s) => { kept.push(...(s.kept || [])); } });
+  };
+
+  /* Examiner's Chair: read a viva answer, tick the qualities it shows, pick the best follow-up. */
+  J.EXAMINER_CHECKLIST = [
+    { id: "A", label: "Answers the question that was asked" },
+    { id: "B", label: "Specific to this project" },
+    { id: "C", label: "Says what any numbers mean (or needs none)" },
+    { id: "D", label: "Is honest about limits or uncertainty" }
+  ];
+
+  E.examiner = function (root, L, ctx) {
+    let allFull = true;
+    const faced = [];
+    sequence(root, L.rounds, (r, i, seq) => {
+      const boxes = J.EXAMINER_CHECKLIST.map((q) => ({ q, b: h("input", { type: "checkbox", id: L.id + "-" + r.id + "-" + q.id }) }));
+      let chosen = null;
+      const submit = C.btn("Lock in my marks", evaluate, "primary", { disabled: true });
+      const opts = U.shuffle(r.followups.map((f, k) => Object.assign({ k }, f))).map((f) => {
+        const b = h("button", { type: "button", class: "claim-pick", "aria-pressed": "false" }, h("span", { class: "claim-mark", "aria-hidden": "true" }), h("span", { class: "claim-body" }, f.text));
+        b.addEventListener("click", () => {
+          chosen = f.k;
+          opts.forEach((x) => x.b.setAttribute("aria-pressed", x.f.k === chosen ? "true" : "false"));
+          submit.disabled = false;
+        });
+        return { f, b, wrap: h("div", { class: "claim-card" }, b) };
+      });
+      const controls = h("div", { class: "controls" },
+        C.step(1, "Which of these does the answer show?"),
+        boxes.map(({ q, b }) => h("label", { class: "check" }, b, " ", h("strong", null, q.id), " · ", q.label)),
+        C.step(2, "Which follow-up question would best test their understanding?"),
+        h("div", { class: "claim-list" }, opts.map((x) => x.wrap)),
+        submit);
+      root.append(C.progress(i, L.rounds.length, "Round"),
+        h("div", { class: "split" },
+          h("div", { class: "artefact-col" },
+            h("div", { class: "decision" }, C.projectTag(r.project, { open: true }), h("p", { class: "rq-label" }, "The examiner asks"), h("p", { class: "decision-text" }, r.question)),
+            h("div", { class: "transcript" }, h("div", { class: "panel-title" }, "The student's answer"), h("p", { class: "quote" }, "“" + r.answer + "”"))),
+          controls));
+
+      function evaluate() {
+        let pts = 0;
+        const rows = boxes.map(({ q, b }) => {
+          const k = r.key[q.id], same = b.checked === k.yes;
+          if (same) pts += 5;
+          return h("li", { class: same ? "ok" : "no" }, h("strong", null, q.id + " · " + q.label + ": "), "key says ", h("strong", null, k.yes ? "yes" : "no"), k.why ? " (" + k.why + ")" : "", " — you ticked ", b.checked ? "yes" : "no", " ", C.pts(same ? 5 : 0));
+        });
+        const fu = r.followups[chosen], fRight = !!fu.ok;
+        if (fRight) pts += 10;
+        boxes.forEach(({ b }) => (b.disabled = true));
+        opts.forEach(({ f, b, wrap }) => { b.disabled = true; wrap.dataset.state = f.ok ? "hit" : f.k === chosen ? "falsepick" : "fine"; });
+        submit.remove();
+        const full = pts === 30;
+        if (!full) allFull = false;
+        if (full && r.key.D.yes) ctx.award("honest-idk");
+        seq.add(pts, 30);
+        faced.push(r.project + ": “" + r.question + "” — " + pts + "/30");
+        U.append(controls, [
+          C.reveal("How the examiners marked it", h("ul", { class: "list ticks-no" }, rows)),
+          C.reveal(fRight ? "You chose the best follow-up" : "The best follow-up was", fRight ? null : h("p", { class: "quote" }, "“" + r.followups.find((f) => f.ok).text + "”"), r.followWhy ? h("p", null, "Why: ", r.followWhy) : null),
+          r.model ? C.reveal("A model answer", h("p", { class: "quote" }, "“" + r.model + "”")) : null,
+          h("div", { class: "row-end" }, h("span", { class: "sum" }, "This round: ", C.pts(pts)), C.btn(i + 1 < L.rounds.length ? "Next round" : "See my results", seq.next))]);
+      }
+    }, (score, max) => {
+      if (allFull) ctx.award("sharp-examiner");
+      ctx.log([L.title + ": judged viva answers as an examiner and chose follow-up questions.", ...faced]);
+      ctx.finish({ score, max, summary: faced, lesson: "Answer the question that was asked, make it about your project, and say what numbers mean. 'I'm not sure — here's how I'd check' is a strong answer, not a weak one." });
+    }, { ctx, collect: () => ({ allFull, faced }), restore: (s) => { allFull = s.allFull !== false; faced.push(...(s.faced || [])); } });
   };
 
   /* ======================= WORLD 5 ======================= */
@@ -711,41 +830,50 @@
       const head = h("div", { class: "decision" }, C.projectTag(pb.project), h("p", { class: "decision-text" }, pb.problem));
       const stage = h("div", { class: "stage" });
       root.append(C.progress(i, L.problems.length, "Problem"), head, stage);
-      phase1();
+      const d0 = seq.saved;
+      if (d0.stage >= 3 && d0.mine != null) phase3(splitMine(d0.mine), d0.tags || {}, d0);
+      else if (d0.stage === 2 && d0.mine != null) phase2(d0.mine, d0.tags || {});
+      else phase1(d0.mine || "");
 
-      function phase1() {
-        const ta = C.textarea(id("mine"), "Your approach. One idea per line.", 7);
+      function splitMine(mine) {
+        return mine.split(/\n+|(?<=[.!?])\s+(?=[A-Z])/).map((x) => x.replace(/^[-*•\d.)\s]+/, "").trim()).filter((x) => U.wordCount(x) >= 3).slice(0, 8);
+      }
+      function phase1(text) {
+        const ta = C.textarea(id("mine"), "Your approach. One idea per line.", 7, text);
         const t = C.timer(L.thinkSeconds, null, !ctx.timers);
-        const lock = C.btn("Lock my answer", () => { t.stop(); phase2(ta.value); }, "primary", { disabled: true });
-        ta.addEventListener("input", () => (lock.disabled = U.wordCount(ta.value) < 8));
+        const lock = C.btn("Lock my answer", () => { t.stop(); seq.draftNow({ stage: 2, mine: ta.value, tags: {} }); phase2(ta.value, {}); }, "primary", { disabled: U.wordCount(text) < 8 });
+        ta.addEventListener("input", () => { lock.disabled = U.wordCount(ta.value) < 8; seq.draft({ stage: 1, mine: ta.value }); });
         stage.append(C.step(1, "Before you see any AI answer: what would YOU do?"), h("p", { class: "hint" }, "No searching, no prompting. Your first thoughts are the point. Once locked, you can't edit them."), ctx.timers ? t.el : null, ta, h("div", { class: "row-end" }, lock));
         if (ctx.timers) t.start();
       }
-      function phase2(mine) {
+      function phase2(mine, tags0) {
         U.clear(stage);
-        const myPoints = mine.split(/\n+|(?<=[.!?])\s+(?=[A-Z])/).map((x) => x.replace(/^[-*•\d.)\s]+/, "").trim()).filter((x) => U.wordCount(x) >= 3).slice(0, 8);
-        const tags = {};
-        const cont = C.btn("Next: compare with my ideas", () => phase3(myPoints, tags), "primary", { disabled: true });
+        const myPoints = splitMine(mine);
+        const tags = Object.assign({}, tags0);
+        const cont = C.btn("Next: compare with my ideas", () => { seq.draftNow({ stage: 3, mine, tags }); phase3(myPoints, tags, { mine }); }, "primary", { disabled: Object.keys(tags).length < pb.aiPoints.length });
         stage.append(
           h("div", { class: "locked" }, h("span", { class: "field-label" }, "Your locked answer"), C.list(myPoints.length ? myPoints : [mine.trim()])),
           C.step(2, "Here's what an AI suggested. Judge each point."),
           h("div", { class: "ai-points" }, pb.aiPoints.map((a) => h("div", { class: "ai-point" }, h("p", null, a.text),
-            C.seg([["useful", "Useful"], ["generic", "Generic"], ["wrong", "Wrong here"]], (v) => { tags[a.id] = v; cont.disabled = Object.keys(tags).length < pb.aiPoints.length; }, "Judge", "tags")))),
+            C.seg([["useful", "Useful"], ["generic", "Generic"], ["wrong", "Wrong here"]], (v) => { tags[a.id] = v; cont.disabled = Object.keys(tags).length < pb.aiPoints.length; seq.draft({ stage: 2, mine, tags }); }, "Judge", "tags", tags[a.id])))),
           h("div", { class: "row-end" }, cont));
       }
-      function phase3(myPoints, tags) {
+      function phase3(myPoints, tags, d3) {
         U.clear(stage);
-        const marks = {};
+        const marks = Object.assign({}, d3.marks);
+        const mine = d3.mine != null ? d3.mine : myPoints.join("\n");
         const items = myPoints.length ? myPoints : ["(your answer)"];
-        const final = C.textarea(id("final"), "Your final decision, now you've seen both.", 3);
-        const defend = h("input", { id: id("defend"), type: "text", placeholder: "One sentence you'd defend in a viva" });
+        const final = C.textarea(id("final"), "Your final decision, now you've seen both.", 3, d3.final || "");
+        const defend = h("input", { id: id("defend"), type: "text", placeholder: "One sentence you'd defend in a viva", value: d3.defend || "" });
+        const keep = () => seq.draft({ stage: 3, mine, tags, marks, final: final.value, defend: defend.value });
         const done = C.btn("Submit", () => reveal(myPoints, tags, marks, final.value, defend.value), "primary", { disabled: true });
         const chk = () => { done.disabled = Object.keys(marks).length < items.length || U.wordCount(final.value) < 5 || U.wordCount(defend.value) < 5; };
-        [final, defend].forEach((x) => x.addEventListener("input", chk));
+        [final, defend].forEach((x) => { x.addEventListener("input", chk); x.addEventListener("input", keep); });
+        setTimeout(chk, 0);
         stage.append(
           C.step(3, "Your ideas: did the AI have them too?"),
           h("div", { class: "ai-points" }, items.map((p, k) => h("div", { class: "ai-point mine" }, h("p", null, p),
-            C.seg([["both", "AI had this too"], ["only", "Only me"]], (v) => { marks[k] = v; chk(); }, "Compare", "tags")))),
+            C.seg([["both", "AI had this too"], ["only", "Only me"]], (v) => { marks[k] = v; chk(); keep(); }, "Compare", "tags", marks[k])))),
           C.step(4, "Decide — and own it"),
           C.field("Final decision", final), C.field("The line you'd defend", defend), h("div", { class: "row-end" }, done));
       }
@@ -772,82 +900,157 @@
       if (onlyTotal >= 2) ctx.award("own-thinker");
       ctx.log([L.title + ": wrote my own approach before seeing AI suggestions; " + onlyTotal + " idea" + (onlyTotal === 1 ? "" : "s") + " the AI didn't have.", "Lines I'd defend: " + defended.join(" ")]);
       ctx.finish({ score, max, summary: ["Ideas only you had: " + onlyTotal].concat(defended.map((d) => "You'd defend: " + d)), lesson: "Think first, then prompt. Seeing the AI's answer first anchors you to it — you'll edit its ideas instead of having your own." });
-    });
+    }, { ctx, collect: () => ({ defended, onlyTotal }), restore: (s) => { defended.push(...(s.defended || [])); onlyTotal = s.onlyTotal || 0; } });
   };
 
+  /* Own ideas first, then rank six common answers, then map your ideas and see how often AI suggests each. */
   E.offmap = function (root, L, ctx) {
     const kept = [];
     let offMap = false;
     sequence(root, L.questions, (qn, i, seq) => {
       const id = (k) => L.id + "-" + qn.id + "-" + k;
-      const tas = [0, 1, 2].map((k) => C.textarea(id("idea" + k), "Idea " + (k + 1) + (k ? " (optional)" : ""), 2));
-      const go = C.btn("Reveal the AI answers", () => phase2(), "primary", { disabled: true });
-      tas.forEach((t) => t.addEventListener("input", () => (go.disabled = !tas.some((x) => U.wordCount(x.value) >= 5))));
+      const d = seq.saved;
+      const theme = (tid) => qn.themes.find((t) => t.id === tid);
+      let ideas = d.ideas || [];
+      let order = d.order || U.shuffle(qn.rank);
+      let maps = d.maps || {};
+      const stage = h("div", { class: "stage" });
       root.append(C.progress(i, L.questions.length, "Question"),
         h("div", { class: "decision" }, C.projectTag(qn.project), h("p", { class: "decision-text" }, qn.question)),
-        h("div", { class: "controls wide" }, C.step(1, "Your ideas — up to three"), h("p", { class: "hint" }, "Rare ideas score more. Obvious ones still score a little. Invalid ones score nothing — so make them good."), tas, h("div", { class: "row-end" }, go)));
+        stage);
+      if (d.stage >= 3 && ideas.length) step3();
+      else if (d.stage === 2 && ideas.length) step2();
+      else step1();
 
-      function phase2() {
-        const ideas = tas.map((t) => t.value.trim()).filter((x) => U.wordCount(x) >= 5);
-        tas.forEach((t) => (t.disabled = true));
-        go.remove();
-        const maxCount = Math.max(...qn.themes.map((t) => t.count));
-        const table = h("div", { class: "themes" }, qn.themes.map((t) => h("div", { class: "theme" },
-          h("span", { class: "theme-label" }, t.label),
-          h("span", { class: "theme-bar" }, h("span", { style: { width: (100 * t.count) / maxCount + "%" } })),
-          h("span", { class: "theme-n" }, t.count + "/" + qn.runs))));
+      /* 1. Your own ideas, before you see anything */
+      function step1() {
+        U.clear(stage);
+        const tas = [0, 1].map((k) => C.textarea(id("idea" + k), "Idea " + (k + 1) + (k ? " (optional)" : ""), 2, ideas[k] || ""));
+        const valid = () => tas.map((t) => t.value.trim()).filter((x) => U.wordCount(x) >= 5);
+        const go = C.btn("Next: rank the common answers", () => { ideas = valid(); seq.draftNow({ stage: 2, ideas, order }); step2(); }, "primary", { disabled: !valid().length });
+        tas.forEach((t) => t.addEventListener("input", () => { go.disabled = !valid().length; seq.draft({ stage: 1, ideas: tas.map((x) => x.value) }); }));
+        U.append(stage, [C.step(1, "Your own ideas first — up to two"), h("p", { class: "hint" }, "Write at least one, at least five words each. Seeing the common answers first would anchor you to them, so you don't see them yet."), tas, h("div", { class: "row-end" }, go)]);
+      }
+
+      /* 2. Rank six common answers, with buttons (no drag needed) */
+      function step2() {
+        U.clear(stage);
+        const list = h("ol", { class: "rank-list" });
+        const paint = () => {
+          U.clear(list);
+          order.forEach((tid, k) => {
+            const t = theme(tid);
+            const up = h("button", { type: "button", class: "btn ghost small", "aria-label": "Move “" + t.label + "” up", disabled: k === 0 }, "Up");
+            const down = h("button", { type: "button", class: "btn ghost small", "aria-label": "Move “" + t.label + "” down", disabled: k === order.length - 1 }, "Down");
+            const move = (by) => { const j = k + by; [order[k], order[j]] = [order[j], order[k]]; seq.draftNow({ stage: 2, ideas, order }); paint(); const again = list.children[j].querySelector(by < 0 ? "button" : "button:nth-of-type(2)"); again && !again.disabled && again.focus(); };
+            up.addEventListener("click", () => move(-1));
+            down.addEventListener("click", () => move(1));
+            list.append(h("li", { class: "rank-row" }, h("span", { class: "rank-n" }, k + 1), h("span", { class: "rank-label" }, t.label), h("span", { class: "rank-btns" }, up, down)));
+          });
+        };
+        paint();
+        stage.append(C.step(2, "Rank these common answers from most useful (1) to least useful (6)"),
+          h("p", { class: "hint" }, "There's no right order. Rank them the way you'd judge them for this problem."),
+          list, h("div", { class: "row-end" }, C.btn("Confirm my ranking", () => { seq.draftNow({ stage: 3, ideas, order }); step3(); })));
+      }
+
+      /* 3. Map each of your ideas to the closest theme */
+      function step3() {
+        U.clear(stage);
         const rows = ideas.map((idea, k) => {
+          const m = maps[k] || {};
           const sel = h("select", { id: id("map" + k) }, h("option", { value: "" }, "Which AI answer is this closest to?"), qn.themes.map((t) => h("option", { value: t.id }, t.label)), h("option", { value: "none" }, "Not on the list"));
-          const just = C.textarea(id("just" + k), "Why is this a valid, useful idea? (at least 12 words)", 2);
+          const just = C.textarea(id("just" + k), "Why is this a valid, useful idea? (at least 12 words)", 2, m.just || "");
           const valid = h("input", { type: "checkbox", id: id("valid" + k) });
+          valid.checked = !!m.valid;
           const extra = h("div", { class: "offmap-extra" }, just, h("label", { class: "check" }, valid, " I'd stand behind this idea in front of the class"));
-          extra.hidden = true;
-          sel.addEventListener("change", () => (extra.hidden = sel.value !== "none"));
+          const keep = () => { maps[k] = { sel: sel.value, just: just.value, valid: valid.checked }; seq.draft({ stage: 3, ideas, order, maps }); };
+          sel.value = m.sel || "";
+          extra.hidden = sel.value !== "none";
+          sel.addEventListener("change", () => { extra.hidden = sel.value !== "none"; keep(); });
+          just.addEventListener("input", keep);
+          valid.addEventListener("change", keep);
           return { idea, sel, just, valid, el: h("div", { class: "ai-point mine" }, h("p", null, idea), sel, extra) };
         });
-        const score = C.btn("Score my ideas", () => {
-          let pts = 0;
-          const lines = rows.map((r) => {
-            let p = 0, note;
-            if (r.sel.value === "none") {
-              const ok = U.wordCount(r.just.value) >= 12 && r.valid.checked;
-              p = ok ? 10 : 0;
-              note = ok ? "Off the map" : "Off the map, but not justified yet";
-              if (ok) offMap = true;
-            } else if (r.sel.value) {
-              const t = qn.themes.find((x) => x.id === r.sel.value);
-              p = Math.max(1, Math.round(10 * (1 - t.count / qn.runs)));
-              note = "Matches “" + t.label + "” (" + t.count + "/" + qn.runs + " AI runs)";
-            } else note = "Not matched";
-            pts += p;
-            kept.push("“" + r.idea + "” — " + note);
-            return h("li", null, h("strong", null, r.idea), " — ", note, " ", C.pts(p));
+        const go = C.btn("Show me the chart", () => reveal(rows), "primary");
+        U.append(stage, [C.step(3, "Map each of your ideas"), h("p", { class: "hint" }, "Which of the AI's common answers is each idea closest to? If none fits, say so and explain why yours is valid."), rows.map((r) => r.el), h("div", { class: "row-end" }, go)]);
+      }
+
+      /* 4. Score, chart, expert comment */
+      function reveal(rows) {
+        let pts = 0;
+        const lines = [], mapped = new Set(), offList = [];
+        rows.forEach((r) => {
+          let p = 0, note;
+          if (r.sel.value === "none") {
+            const ok = U.wordCount(r.just.value) >= 12 && r.valid.checked;
+            p = ok ? 10 : 0;
+            note = ok ? "Off the map" : "Off the map, but not justified yet";
+            if (ok) offMap = true;
+            offList.push(r.idea);
+          } else if (r.sel.value) {
+            const t = theme(r.sel.value);
+            p = Math.max(1, Math.round(10 * (1 - t.count / qn.runs)));
+            note = "Matches “" + t.label + "” (" + t.count + "/" + qn.runs + " AI runs)";
+            mapped.add(t.id);
+          } else note = "Not matched";
+          pts += p;
+          kept.push("“" + r.idea + "” — " + note);
+          lines.push(h("li", null, h("strong", null, r.idea), " — ", note, " ", C.pts(p)));
+        });
+        const total = 5 + Math.min(20, pts);
+        seq.add(total, 25);
+        const top3 = new Set(order.slice(0, 3));
+        const data = qn.themes.map((t) => [t.label, t.count]);
+        const marks = [];
+        qn.themes.forEach((t, k) => {
+          const tags = [top3.has(t.id) ? "Your top 3" : null, mapped.has(t.id) ? "Your idea" : null].filter(Boolean);
+          if (tags.length) marks.push([k, tags.join(" · ")]);
+        });
+        const highlights = [];
+        offList.forEach((x, k) => { data.push(["Your idea" + (offList.length > 1 ? " " + (k + 1) : ""), 0]); highlights.push(data.length - 1); });
+        const cohortLine = h("p", { class: "hint", hidden: true });
+        const chart = { label: "How many of " + qn.runs + " AI runs suggested each idea", max: qn.runs, unit: "", data, marks, highlights, labelW: 200, barW: 130, padR: 44 };
+        const chartBox = h("div", { class: "slide-frame offmap-chart" }, R.chart(chart));
+        if (J.remote && J.remote.enabled && J.remote.offmapSummary) {
+          J.remote.offmapSummary(J.store.state.profile.cohort, qn.id).then((rowsIn) => {
+            if (!rowsIn || !rowsIn.length) return;
+            const byTheme = {};
+            rowsIn.forEach((x) => (byTheme[x.theme] = x.pct));
+            chart.second = data.map((_, k) => (qn.themes[k] ? byTheme[qn.themes[k].id] || 0 : 0));
+            chart.secondLabel = "Share of your cohort who ranked it in their top 3";
+            U.clear(chartBox); chartBox.append(R.chart(chart));
           });
-          pts = Math.min(30, pts);
-          seq.add(pts, 30);
-          score.remove();
-          area.append(C.reveal("Your ideas", h("ul", { class: "list" }, lines)),
-            h("p", { class: "hint" }, "In class, the room votes on whether off-the-map ideas really are valid. Be ready to explain yours."),
-            h("div", { class: "row-end" }, h("span", { class: "sum" }, "This question: ", C.pts(pts)), C.btn(i + 1 < L.questions.length ? "Next question" : "See my results", seq.next)));
-        }, "primary", { disabled: !rows.length });
-        const area = h("div", { class: "controls wide" },
-          C.step(2, "What AI usually says"), h("p", { class: "hint" }, L.runsNote), table,
-          C.step(3, "Map each of your ideas"), rows.map((r) => r.el), h("div", { class: "row-end" }, score));
-        root.append(area);
-        C.scrollTop(area);
+        }
+        U.clear(stage);
+        stage.append(
+          C.reveal("Your ideas", h("ul", { class: "list" }, lines), h("p", { class: "hint" }, "Ranking is not marked right or wrong. Completing it earns 5 points; your ideas earn the rest.")),
+          C.reveal("What AI usually says", h("p", { class: "hint" }, L.runsNote), chartBox, cohortLine),
+          C.reveal("What the examiners say", h("p", { class: "quote" }, qn.expert)),
+          h("p", { class: "hint" }, "In class, the room votes on whether off-the-map ideas really are valid. Be ready to explain yours."),
+          h("div", { class: "row-end" }, h("span", { class: "sum" }, "This question: ", C.pts(total)), C.btn(i + 1 < L.questions.length ? "Next question" : "See my results", seq.next)));
+        C.scrollTop(stage);
       }
     }, (score, max) => {
       if (offMap) ctx.award("off-the-map");
       ctx.log([L.title + ": generated my own ideas before seeing what AI typically suggests.", ...kept]);
       ctx.finish({ score, max, summary: kept, lesson: "The common answers are common because they're the average. They're often right — and they're what every other submission says. Marks above average come from the ideas off the map." });
-    });
+    }, { ctx, collect: () => ({ kept, offMap }), restore: (s) => { kept.push(...(s.kept || [])); offMap = !!s.offMap; } });
   };
 
   E.constraints = function (root, L, ctx) {
     const rounds = L.rounds || 2;
-    let r = 0, score = 0;
+    let r = 0, score = 0, finished = false, timer = null, persistNow = null;
     const log = [];
-    const choices = ["My own project"].concat(Object.keys(J.CASE_SUMMARIES).filter((k) => k !== "Late or Not?"));
+    const choices = Object.keys(J.PROJECTS || {});
+    const saved = ctx.checkpoint.load();
+    let resume = null;
+    if (saved && saved.itemIndex != null && saved.itemIndex < rounds) {
+      r = saved.itemIndex; score = saved.score || 0;
+      log.push(...((saved.data && saved.data.log) || []));
+      resume = (saved.data && saved.data.round) || null;
+    }
+    ctx.checkpoint.onLeave(() => { if (timer && persistNow) persistNow(); });
     round();
 
     function draw() {
@@ -855,7 +1058,8 @@
     }
     function round() {
       U.clear(root);
-      let hand = draw(), redraws = 1, project = null;
+      const back = resume; resume = null;
+      let hand = (back && back.hand) || draw(), redraws = back ? back.redraws : 1, project = back && choices.includes(back.project) ? back.project : null, closed = false;
       const cardsEl = h("div", { class: "cards" });
       const paint = () => {
         U.clear(cardsEl);
@@ -865,30 +1069,41 @@
         });
       };
       paint();
-      const redraw = C.btn("Redraw (1 left)", () => { if (redraws-- > 0) { hand = draw(); paint(); redraw.disabled = true; redraw.textContent = "No redraws left"; check(); } }, "ghost small");
-      const ta = C.textarea(L.id + "-r" + r + "-text", "Explain the project under these rules.", 6);
-      const own = h("input", { type: "text", id: L.id + "-r" + r + "-own", placeholder: "Your project's title" });
-      own.hidden = true;
+      const redraw = C.btn("Redraw (1 left)", () => { if (redraws-- > 0) { hand = draw(); paint(); redraw.disabled = true; redraw.textContent = "No redraws left"; check(); persist(); } }, "ghost small");
+      if (redraws <= 0) { redraw.disabled = true; redraw.textContent = "No redraws left"; }
+      const ta = C.textarea(L.id + "-r" + r + "-text", "Explain the project under these rules.", 6, (back && back.text) || "");
+      const briefBox = h("div", { class: "project-brief-box" });
+      const showBrief = () => { U.clear(briefBox); if (project) briefBox.append(C.projectTag(project, { open: true })); };
+      function persist() {
+        clearTimeout(timer); timer = null;
+        if (finished || closed) return;
+        ctx.checkpoint.save({ log, round: { hand, redraws, project, text: ta.value } }, { itemIndex: r, score, max: r * 30 });
+      }
+      persistNow = persist;
+      const later = () => { if (closed || finished) return; clearTimeout(timer); timer = setTimeout(persist, 500); };
       const fm = C.meter("Format rule");
       const submit = C.btn("Done", rubric, "primary", { disabled: true });
       const fmtOk = () => formatCheck(hand.format.check, ta.value);
       function check() {
         const ok = fmtOk();
         fm.set(hand.format.check ? (ok ? "met" : "not yet") : "you judge this one", hand.format.check ? (ok ? "ok" : "bad") : "");
-        submit.disabled = !project || (project === "My own project" && !own.value.trim()) || U.wordCount(ta.value) < 8;
+        submit.disabled = !project || U.wordCount(ta.value) < 8;
       }
       ta.addEventListener("input", check);
-      own.addEventListener("input", check);
+      ta.addEventListener("input", later);
       root.append(C.progress(r, rounds, "Round"),
         h("div", { class: "brief" }, h("p", null, "Three cards set the rules. Explain a project to that audience, in that format, with that twist. No AI could have written your answer, because no AI drew your cards.")),
         cardsEl, h("div", { class: "row-end" }, redraw),
         h("div", { class: "controls wide" },
-          C.field("Project", C.seg(choices.map((c) => [c, c]), (v) => { project = v; own.hidden = v !== "My own project"; check(); }, "Project", "projects")), own,
+          C.field("Project", C.seg(choices.map((c) => [c, c]), (v) => { project = v; showBrief(); check(); persist(); }, "Project", "projects", project)), briefBox,
           C.field("Your explanation", ta), h("div", { class: "meters" }, fm.el), h("div", { class: "row-end" }, submit)));
+      showBrief();
       check();
+      persist();
 
       function rubric() {
         const ok = hand.format.check ? fmtOk() : true;
+        closed = true; clearTimeout(timer); timer = null;
         ta.disabled = true;
         submit.remove();
         const boxes = L.rubric.map((x) => ({ x, b: h("input", { type: "checkbox", id: L.id + "-r" + r + "-" + x.id }) }));
@@ -903,6 +1118,7 @@
       }
     }
     function end() {
+      finished = true;
       ctx.log([L.title + ": explained projects under random constraints:", ...log]);
       ctx.finish({ score, max: rounds * 30, summary: log, lesson: "Constraints force choices, and choices are where your understanding shows. If you can explain it with zero numbers to a 14-year-old, you can explain it to an examiner." });
     }
@@ -930,7 +1146,7 @@
 
   J.recordText = function (st) {
     const rec = st.record || {};
-    const lines = ["JUDGEMENT RECORD — " + (J.config.appName || "JUDGE Arena"), "Player: " + st.profile.nick + " (class " + st.profile.cls + ")", "Date: " + new Date().toLocaleDateString("en-GB"), ""];
+    const lines = ["JUDGEMENT RECORD — " + (J.config.appName || "JUDGE Arena"), "Player: " + st.profile.code + " (" + J.store.cohortLabel(st.profile.cohort) + ")", "Date: " + new Date().toLocaleDateString("en-GB"), ""];
     J.RECORD_FIELDS.forEach((f) => lines.push(f.label.toUpperCase(), (rec[f.id] || "—").trim(), ""));
     lines.push("EVIDENCE FROM PRACTICE");
     Object.values(st.evidence || {}).forEach((arr) => arr.forEach((l) => lines.push("• " + l)));
@@ -944,6 +1160,7 @@
     st.record = st.record || {};
     if (opts.defaultProject && !st.record.project) st.record.project = opts.defaultProject;
     const inputs = {};
+    const locked = !J.store.finalDone();
     const ev = Object.values(st.evidence || {}).flat();
     const fallback = h("textarea", { class: "copy-fallback", rows: 8, readonly: true, hidden: true, "aria-label": "Record text to copy" });
     const status = h("span", { class: "hint", role: "status" });
@@ -961,10 +1178,11 @@
         })),
         h("aside", { class: "record-evidence" }, h("div", { class: "panel-title" }, "Evidence from your practice"),
           ev.length ? C.list(ev, "list small") : h("p", { class: "hint" }, "Play some levels and your evidence collects here."))),
+      locked ? h("p", { class: "hint" }, "Download and print unlock once you have finished the final level and answered the final questions. You can still copy the text.") : null,
       h("div", { class: "actionbar" }, status,
-        C.btn("Copy as text", async () => { save(); const ok = await U.copy(J.recordText(st), fallback); status.textContent = ok ? "Copied" : "Select the text below and copy it"; }, "ghost"),
-        U.framed ? null : C.btn("Download .txt", () => { save(); U.download("judgement-record-" + st.profile.nick + ".txt", J.recordText(st)); }, "ghost"),
-        U.framed ? null : C.btn("Print", () => { save(); window.print(); }, "ghost"),
+        C.btn("Copy as text", async () => { save(); const ok = await U.copy(J.recordText(st), fallback); status.textContent = ok ? "Copied" : "Select the text below and copy it"; }, "ghost", { "data-copy-ok": "" }),
+        U.framed ? null : C.btn("Download .txt", () => { save(); U.download("judgement-record-" + st.profile.code + ".txt", J.recordText(st)); }, "ghost", { disabled: locked }),
+        U.framed ? null : C.btn("Print", () => { save(); window.print(); }, "ghost", { disabled: locked }),
         opts.onDone ? C.btn("Submit my record", () => {
           save();
           const filled = J.RECORD_FIELDS.filter((f) => U.wordCount(st.record[f.id]) >= (f.rows === 1 ? 1 : 10)).length;
@@ -979,8 +1197,11 @@
   };
 
   E.boss = function (root, L, ctx) {
-    let k = 0, score = 0, max = 0;
+    let k = 0, score = 0, max = 0, stageSaved = null;
     const summary = [];
+    const saved = ctx.checkpoint.load();
+    if (saved && saved.data && saved.data.k != null) { k = saved.data.k; score = saved.data.score || 0; max = saved.data.max || 0; summary.push(...(saved.data.summary || [])); stageSaved = saved.data.inner || null; }
+    const persist = () => ctx.checkpoint.save({ k, score, max, summary, inner: stageSaved }, { itemIndex: k, score, max });
     const pips = h("div", { class: "pips" }, L.stages.map((s, n) => h("span", { class: "pip", dataset: { n } }, s.title.replace(/^Stage \d+ — /, ""))));
     const stageRoot = h("div");
     U.clear(root);
@@ -993,11 +1214,19 @@
       stageRoot.append(h("h2", { class: "stage-title" }, st.title));
       const inner = h("div");
       stageRoot.append(inner);
+      /* Each stage gets its own checkpoint, stored inside the boss's. */
+      const stageCp = {
+        load: () => stageSaved,
+        save(data, pos) { pos = pos || {}; stageSaved = { data, savedAt: Date.now(), itemIndex: pos.itemIndex == null ? null : pos.itemIndex, score: pos.score || 0, max: pos.max || 0 }; persist(); },
+        clear() { stageSaved = null; },
+        onLeave: (fn) => ctx.checkpoint.onLeave(fn)
+      };
       const sub = Object.assign({}, ctx, {
+        checkpoint: stageCp,
         finish(res) {
           score += res.score; max += res.max;
           summary.push(st.title + ": " + res.score + "/" + res.max);
-          k++;
+          k++; stageSaved = null; persist();
           if (k < L.stages.length) {
             U.clear(stageRoot);
             stageRoot.append(C.reveal(st.title + " complete", h("p", null, "Stage score: ", h("strong", null, res.score + " / " + res.max)), res.lesson ? h("p", { class: "hint" }, res.lesson) : null),
